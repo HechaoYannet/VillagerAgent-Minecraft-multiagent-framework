@@ -7,8 +7,8 @@ from openpyxl.styles import Font, Alignment
 import shutil
 
 # 定义路径
-# base_dir = './'
-base_dir = './../processed_result/base_agent_multi/qwen3-80b-instruct/supplement/1/'
+base_dir = './'
+# base_dir = './../processed_result/base_agent_multi/qwen2.5-7B-Instruct/supplement/2/'
 output_excel_path = 'SFT base agent.xlsx'
 
 def base_agent_filter():
@@ -41,6 +41,9 @@ def base_agent_filter():
                 #     # 删除不为100的文件夹
                 #     shutil.rmtree(folder_path)  # <-- 修改：删除该文件夹
                 #     print(f"已删除文件夹：{folder_name}")  # <-- 修改：日志提示
+            else:
+                shutil.rmtree(folder_path)  # <-- 修改：删除该文件夹
+                print(f"已删除文件夹：{folder_name}")
 
     # 创建 Excel 文件
     wb = openpyxl.Workbook()

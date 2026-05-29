@@ -42,6 +42,16 @@ def filter_emoji_from_dict(obj):
     else:
         return obj
 
+def qwen_non_thinking_model_kwargs(model: str, base_url: str) -> dict:
+    model_name = (model or "").lower()
+    base_url = (base_url or "").lower()
+    local_model = "localhost" in base_url or "127.0.0.1" in base_url
+    if local_model and ("qwen3" in model_name or model_name == "default"):
+        return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
+    if "qwen3" in model_name:
+        return {"extra_body": {"enable_thinking": False}}
+    return {}
+
 
 def timeit(func):
     @wraps(func)
@@ -939,7 +949,7 @@ class Agent():
             self.llm = ChatTongyi(model=self.model, temperature=0, max_tokens=256, dashscope_api_key=random.choice(Agent.api_key_list), base_url=Agent.base_url,model_kwargs={"enable_thinking": False})
         elif "default" in self.model:
             from langchain.llms import OpenAI
-            self.llm = OpenAI(model=self.model, temperature=0, max_tokens=256, openai_api_key=random.choice(Agent.api_key_list), base_url=Agent.base_url)
+            self.llm = OpenAI(model=self.model, temperature=0, max_tokens=256, openai_api_key=random.choice(Agent.api_key_list), base_url=Agent.base_url, model_kwargs=qwen_non_thinking_model_kwargs(self.model, Agent.base_url))
         elif "deepseek" in self.model:
             from openai import OpenAI
             self.llm = OpenAI(model=self.model, temperature=0, max_token=256, openai_api_key=random.choice(Agent.api_key_list), base_url=Agent.base_url)
@@ -1040,7 +1050,7 @@ class Agent():
             self.llm = ChatTongyi(model=self.model, temperature=0, max_tokens=256, dashscope_api_key=random.choice(Agent.api_key_list), base_url=Agent.base_url,model_kwargs={"enable_thinking": False})
         elif "default" in self.model:
             from langchain.llms import OpenAI
-            self.llm = OpenAI(model=self.model, temperature=0, max_tokens=256, openai_api_key=random.choice(Agent.api_key_list), base_url=Agent.base_url)
+            self.llm = OpenAI(model=self.model, temperature=0, max_tokens=256, openai_api_key=random.choice(Agent.api_key_list), base_url=Agent.base_url, model_kwargs=qwen_non_thinking_model_kwargs(self.model, Agent.base_url))
         elif ("instruct" in self.model and "gpt" in self.model):
             from langchain.llms import OpenAI
             self.llm = OpenAI(model=self.model, temperature=0, max_tokens=256, openai_api_key=random.choice(Agent.api_key_list), base_url=Agent.base_url)

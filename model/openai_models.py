@@ -100,6 +100,16 @@ class OpenAILanguageModel(AbstractLanguageModel):
                 }
                 json.dump(init_data, token_file)
 
+    def _qwen_non_thinking_kwargs(self, model: str) -> dict:
+        model_name = (model or self.api_model or "").lower()
+        api_base = (self.api_base or "").lower()
+        local_model = "localhost" in api_base or "127.0.0.1" in api_base
+        if local_model and ("qwen3" in model_name or model_name == "default"):
+            return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
+        if "qwen3" in model_name:
+            return {"extra_body": {"enable_thinking": False}}
+        return {}
+
     def generate_thoughts(self, state, k):
         pass
 
@@ -218,10 +228,12 @@ class OpenAILanguageModel(AbstractLanguageModel):
         # logger.info("api")
         start_time = time.time()
 
-        if "qwen3" in model:
-            completion = self.client.chat.completions.create(model=model, messages=messages, temperature=temperature, extra_body={"enable_thinking": False})
-        else:
-            completion = self.client.chat.completions.create(model=model, messages=messages, temperature=temperature)
+        completion = self.client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            **self._qwen_non_thinking_kwargs(model),
+        )
         # logger.warning(completion.choices[0].message.content)
         logger.debug(f"Time taken: {time.time() - start_time}")
         return completion
@@ -241,6 +253,7 @@ class OpenAILanguageModel(AbstractLanguageModel):
             messages=messages,
             stream=True,
             temperature=temperature,
+            **self._qwen_non_thinking_kwargs(model),
         )
         for chunk in stream:
             if chunk.choices[0].delta.content is not None:
@@ -509,4 +522,3 @@ class OpenAILanguageModel(AbstractLanguageModel):
                 logger.warning(e.__cause__)
                 raise e
                
-

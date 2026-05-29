@@ -28,6 +28,7 @@ data/recipe_hint.json
 data/action_log.json
 data/map_description.json
 data/map.json
+data/vllm.logs
 img/*graph.png
 img/*graph.md
 ui/logs/*
@@ -38,8 +39,7 @@ processed_result/*
 *.zip
 
 .cache/*.cache
-.cache/state.json
-.cache/meta_setting.json
+.cache/*.json
 
 package-lock.json
 /.vscode/*

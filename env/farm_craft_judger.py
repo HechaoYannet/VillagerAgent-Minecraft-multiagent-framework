@@ -310,7 +310,7 @@ if __name__ == '__main__':
                 bot.chat(f"sugar: {task_data['sugar']}")
             elif "rabbit_stew" in task_data["name"]:
                 bot.chat(f"name: {task_data['name']}")
-                bot.chat(f"cooked_rabbit: {task_data['cooked_rabbit']}")
+                bot.chat(f"rabbit: {task_data['cooked_rabbit']}")
                 bot.chat(f"baked_potato: {task_data['baked_potato']}")
                 bot.chat(f"carrot: {task_data['carrot']}")
                 bot.chat(f"brown_mushroom: {task_data['brown_mushroom']}")
