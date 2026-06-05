@@ -434,6 +434,8 @@ def get_envs_info(bot, RENDER_DISTANCE=16, same_entity_num=2):
 
         def getTime(bot):
             timeOfDay = bot.time.timeOfDay
+            if timeOfDay is None:
+                return "unknown"
             if timeOfDay < 1000:
                 time = "sunrise"
             elif timeOfDay < 3000:

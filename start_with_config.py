@@ -14,29 +14,20 @@ from pipeline.data_manager import DataManager
 from pipeline.task_manager import TaskManager
 import json
 
+api_key_list = json.load(open("API_KEY_LIST", "r"))["AGENT_KEY"]
+LLM_API_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+LLM_API_MODEL = "qwen3-next-80b-a3b-instruct"
+CONFIG_PATH = "base_agent_multi_test_config.json"
+
 print(f"pipeline Time taken: {time.time() - start_time}")
 start_time = time.time()
 
-os.environ["NO_PROXY"] = "localhost,127.0.0.1,::1"
-os.environ["no_proxy"] = "localhost,127.0.0.1,::1"
-
-def run(api_model: str, api_base: str, task_type: str, task_idx: int, agent_num: int, dig_needed: bool, max_task_num: int, task_goal: str, document_file: str, host: str, port: int, task_name: str, role: str = "same", api_key_list: list = [], document: dict = {}):
+def run(api_model: str, api_base: str, task_type: str, task_idx: int, agent_num: int, dig_needed: bool, max_task_num: int, task_goal: str, document_file: str, host: str, port: int, task_name: str, role: str = "same", document: dict = {}):
     start_time = time.time()
 
-    api_key_list = json.load(open("API_KEY_LIST", "r"))["AGENT_KEY"]
-
-    # Agent.base_url = "https://api.deepseek.com/v1"
-    # Agent.model = "deepseek-chat"
-
-    # Agent.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    # # Agent.model = "qwen3-235b-a22b"
-    # Agent.model = "qwen3-next-80b-a3b-instruct"
-    # Agent.api_key_list = api_key_list
-
-    # Agent.base_url = "http://10.112.59.240:55049/v1"
-    Agent.base_url = "http://localhost:8269/v1/"
-    Agent.model = "default"
-    Agent.api_key_list = ["sk-VillagerTuning"]
+    Agent.base_url = api_base
+    Agent.model = api_model
+    Agent.api_key_list = api_key_list
 
     # 设置env
     if task_type == "construction":
@@ -117,57 +108,18 @@ def run(api_model: str, api_base: str, task_type: str, task_idx: int, agent_num:
         # 设置llm
         llm_config = {
             "api_key": api_key_list[0],
-            "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "api_model": "qwen3-next-80b-a3b-instruct",
-            # "api_model": "qwen-max",
+            "api_base": LLM_API_BASE,
+            "api_model": LLM_API_MODEL,
             "api_key_list": api_key_list
         }
-        # llm_config = {
-        #     "api_key": api_key_list[0],
-        #     "api_base": "https://api.deepseek.com/v1",
-        #     "api_model": "deepseek-chat",
-        #     "api_key_list": api_key_list
-        # }
-        
-        # llm_config = {
-        #     "api_key": "sk-VillagerTuning",
-        #     # "api_base": "http://10.112.59.240:50892/v1",
-        #     "api_base": "http://localhost:8264/v1/",
-        #     "api_model": "default",
-        #     "api_key_list": ["sk-VillagerTuning"]
-        # }
-
         tm_llm_config = llm_config
         dm_llm_config = llm_config
-        # base_llm_config = llm_config
 
-
-        # tm_llm_config = {
-        #     "api_key": api_key_list[0],
-        #     "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        #     "api_model": "qwen-max",
-        #     "api_key_list": api_key_list
-        # }
-
-        # dm_llm_config = {
-        #     "api_key": api_key_list[0],
-        #     "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        #     "api_model": "qwen-plus",
-        #     "api_key_list": api_key_list
-        # }
-
-        # base_llm_config = {
-        #     "api_key": api_key_list[0],
-        #     "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        #     "api_model": "qwen3-next-80b-a3b-instruct",
-        #     "api_key_list": api_key_list
-        # }
         base_llm_config = {
-            "api_key": "sk-VillagerTuning",
-            # "api_base": "http://10.112.59.240:50892/v1",
-            "api_base": "http://localhost:8269/v1/",
-            "api_model": "default",
-            "api_key_list": ["sk-VillagerTuning"]
+            "api_key": api_key_list[0],
+            "api_base": LLM_API_BASE,
+            "api_model": LLM_API_MODEL,
+            "api_key_list": api_key_list
         }
 
 
@@ -177,8 +129,7 @@ def run(api_model: str, api_base: str, task_type: str, task_idx: int, agent_num:
                                 base_agent_config=base_llm_config,
                                 all_tools=agent_tool)
 
-        # response = ctrl.agent_list[0].llm.few_shot_generate_thoughts(system_prompt="", example_prompt="hi")
-        # print(response)
+
         if task_type == "farming": #补充材料来源prompt
             with open("data/farm_setting.json", "r") as f:
                 task_settings = json.load(f)
@@ -206,9 +157,7 @@ def run(api_model: str, api_base: str, task_type: str, task_idx: int, agent_num:
 
 
 if __name__ == "__main__":
-    # with open("qwen3_235b_a22b_launch_config_farming.json", "r") as f:
-    # with open("/home/yubo/VillagerAgent-Minecraft-multiagent-framework/test_config.json", "r") as f:
-    with open("base_agent_multi_test_config.json", "r") as f:
+    with open(CONFIG_PATH, "r") as f:
         launch_config = json.load(f)
     # shuffle 
     # launch_config = random.sample(launch_config, len(launch_config))
@@ -228,25 +177,13 @@ if __name__ == "__main__":
         if os.path.exists(".cache/heart_beat.cache"):
             os.remove(".cache/heart_beat.cache")
 
-
-        api_key_list = json.load(open("API_KEY_LIST", "r"))["AGENT_KEY"]
-
         llm_config = {
             "api_key": api_key_list[0],
-            "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "api_model": "qwen3-next-80b-a3b-instruct",
-            # "api_model": "qwen-max",
+            "api_base": LLM_API_BASE,
+            "api_model": LLM_API_MODEL,
             "api_key_list": api_key_list
         }
 
-        # llm_config = {
-        #     "api_key": "sk-VillagerTuning",
-        #     # "api_base": "http://10.112.59.240:50892/v1",
-        #     "api_base": "http://localhost:8264/v1/",
-        #     "api_model": "default",
-        #     "api_key_list": ["sk-VillagerTuning"]
-        # }
-        
         process = multiprocessing.Process(target=run,
                                             args=(llm_config["api_model"],
                                                 llm_config["api_base"],
@@ -261,7 +198,6 @@ if __name__ == "__main__":
                                                 config["port"],
                                                 config["task_name"],
                                                 config.get("role", "same"),
-                                                [llm_config["api_key_list"]],
                                                 config.get("evaluation_arg", {})
                                             )
                                           )
@@ -310,6 +246,3 @@ if __name__ == "__main__":
                 pass
 
         print(f"task {i+1} end")
-
-# python env/minecraft_server.py -H 10.214.180.148 -P 25565 -LP 5000 -U Alice -W world -D false
-# python env/meta_judger.py --idx 0 --host 10.214.180.148 --port 25565 --agent_num 1 --agent_names Alice --task_name meta_test_task0

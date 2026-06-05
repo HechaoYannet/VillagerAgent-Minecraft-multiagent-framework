@@ -135,14 +135,12 @@ Customize your private tasks in your Minecraft server with our VillagerAgent mul
 ### Requirements
 - **Python Version**: Python 3.8 or newer installed on your system.
 - **API Keys**: Obtain API keys from one or more of the following services:
+  - Alibaba Cloud Model Studio (for access to Qwen models)
   - OpenAI (for access to models like GPT-4)
   - Google Cloud (for access to models like Gemini)
   - Zhipu AI (for access to GLM models)
-- **NPM Package**: Node Package Manager (npm) installed, which is typically included with Node.js：
-  ```python
-  python js_setup.py
-  ```
-- **Minecraft Server**: If you want to know how to configure the Minecraft 1.19.2 server, please see the [tutorial here](#minecraft-1192-server-setup).
+- **Node.js and npm**: Node Package Manager (npm) installed, which is typically included with Node.js.
+- **Minecraft Server**: A Minecraft 1.19.2 server running locally or on a reachable host. For local quickstart, use `localhost:25565`. If you want to know how to configure the Minecraft 1.19.2 server, please see the [tutorial here](#minecraft-1192-server-setup).
 - **Python Dependencies**: Install all necessary Python libraries as specified in the `requirements.txt` file. You can install these dependencies using the following command:
   ```
   pip install -r requirements.txt
@@ -162,77 +160,42 @@ Customize your private tasks in your Minecraft server with our VillagerAgent mul
 3. Install the dependencies 🧑‍🍳:
    ```bash
    pip install -r requirements.txt
+   npm install
+   python js_setup.py
    ```
 4. Set up your API key 🗝️:
    - Craft a file named `API_KEY_LIST` and inscribe your API key in this way:
    ```json
    {
-      "OPENAI":["put your openai key here", ...],
-      "GEMINI":[...],
-      "GLM":[...],
-      ...
+      "AGENT_KEY": ["put your qwen/dashscope api key here"]
    }
    ```
-   - We might try calling multiple available APIs to break through the access limit.
    - Place this file in the root of the project directory.
 
 ## QuickStart 🚀
 
+1. Start a Minecraft 1.19.2 server and make sure it is reachable at `localhost:25565`.
+2. Run the minimal example:
+   ```bash
+   python tiny_start.py
+   ```
+3. After `Alice` joins the server, grant it operator permission in the Minecraft server console:
+   ```text
+   /op Alice
+   ```
+
+The default model settings are defined near the top of `tiny_start.py`:
+
 ```python
-from env.env import VillagerBench, env_type, Agent
-from pipeline.controller import GlobalController
-from pipeline.data_manager import DataManager
-from pipeline.task_manager import TaskManager
-import json
-
-if __name__ == "__main__":
-
-    # 🌍 Set Environment
-    env = VillagerBench(env_type.construction, task_id=0, _virtual_debug=False, dig_needed=False)
-
-    # 🤖 Set Agent
-    api_key_list = json.load(open("API_KEY_LIST", "r"))["OPENAI"]  # 🗝️ Use OPENAI as an example
-    base_url = "base url of the model"
-    llm_config = {
-        "api_model": "fill in the model name here",  # For example, "gpt-4-1106-preview"
-        "api_base": base_url,  # 🔗 For example, "https://api.openai.com/v1"
-        "api_key_list": api_key_list
-    }
-
-    Agent.model = "fill in the agent model name here"  # 🛠️ Customize your agent model
-    Agent.base_url = base_url
-    Agent.api_key_list = api_key_list
-
-    # 🔨 More agent tools can be added here - refer to the agent_tool in doc/api_library.md
-    agent_tool = [Agent.fetchContainerContents, Agent.MineBlock, ..., Agent.handoverBlock]
-
-    # 📝 Register Agent
-    env.agent_register(agent_tool=agent_tool, agent_number=3, name_list=["Agent1", "Agent2", "Agent3"])  # Ensure the agent number matches the agent_tool
-    # ⚠️ Use /op to give the agent permission to use commands on the Minecraft server, e.g., /op Agent1
-
-    # 🏃‍♂️ Run Environment
-    with env.run():
-        
-        # Set Data Manager
-        dm = DataManager(silent=False)
-        dm.update_database_init(env.get_init_state())
-
-        # Set Task Manager
-        tm = TaskManager(silent=False)
-
-        # Set Controller
-        ctrl = GlobalController(llm_config, tm, dm, env)
-
-        # Set Task
-        tm.init_task("Write your task description here.", json.load(open("your json task related file here if any.")))
-
-        # 🚀 Run Controller
-        ctrl.run()
+LLM_API_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+LLM_API_MODEL = "qwen3-next-80b-a3b-instruct"
 ```
+
+If your Minecraft server is not local, update `MINECRAFT_HOST` and `MINECRAFT_PORT` in `tiny_start.py`.
 
 ### Batch Testing 🧪
 - Whip up test configs with `config.py` 📝.
-- Kick off automated batch testing with `start with config.py` 🤖.
+- Kick off automated batch testing with `start_with_config.py` 🤖.
 
 
 ### Docker 🐳

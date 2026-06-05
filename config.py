@@ -24,38 +24,16 @@ task_number = 1
 logger = init_logger("TASK_GOAL", dump=False, level=logging.DEBUG, silent=False)
 
 api_key_list = json.load(open("API_KEY_LIST", "r"))["AGENT_KEY"]
-# llm_config = {
-#     # "api_model": "gpt-4o",
-#     "api_model": "gpt-4-1106-preview",
-#     # "api_base": "https://api.openai.com/v1/",
-#     "api_base": "https://api.chatanywhere.tech/v1",
-#     "api_key_list": api_key_list,
-#     "api_key": random.choice(api_key_list)
-# }
+LLM_API_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+LLM_API_MODEL = "qwen3-next-80b-a3b-instruct"
+
 llm_config = {
     "api_key": api_key_list[0],
-    "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "api_model": "qwen3-235b-a22b",
+    "api_base": LLM_API_BASE,
+    "api_model": LLM_API_MODEL,
     "api_key_list": api_key_list
 }
 
-# llm_config ={
-#     "api_key": api_key_list[0],
-#     "api_base": "https://api.deepseek.com",
-#     "api_model": "deepseek-chat",
-#     "api_key_list":api_key_list
-# }
-
-# llm_config = {
-#     "api_key": "sk-villageragent",
-#     "api_base": "http://10.130.130.13:8000/v1",
-#     "api_model": "llama_gptq4/"
-# }
-# llm_config = {
-#     "api_key": "sk-qwen05b",
-#     "api_base": "http://10.130.130.13:8002/v1",
-#     "api_model": "/mount/NAS1/public/Qwen2.5-0.5B-Instruct-GPTQ-Int8"
-# }
 llm = init_language_model(llm_config)
 # task_goal_prompt = "Randomly choose another way to express the following sentence. Try to change the sentence pattern instead of replacing words and try to avoid repetitive sentence patterns as much as possible. Making sure the meaning does not change: "
 task_goal_prompt = """
@@ -75,8 +53,8 @@ You should randomly select only one sentence from your rewritten version and ret
 """
 
 template = {
-    "api_model": "qwen_max",
-    "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "api_model": LLM_API_MODEL,
+    "api_base": LLM_API_BASE,
     "task_type": "meta",
     "task_idx": 0,
     "agent_num": 1,
@@ -1025,7 +1003,7 @@ def generate_config(task, api_model, host, port, agent_num=2):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", type=str, default="meta", help="task type")
-    parser.add_argument("--api_model", type=str, default="qwen-max", help="api model")
+    parser.add_argument("--api_model", type=str, default=LLM_API_MODEL, help="api model")
     parser.add_argument("--host", type=str, default="10.214.180.148", help="host")
     parser.add_argument("--port", type=int, default=25565, help="port")
     parser.add_argument("--agent_num", type=int, default=1, help="agent number")

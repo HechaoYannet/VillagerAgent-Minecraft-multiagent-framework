@@ -60,3 +60,5 @@ filtered_tasks.json
 dm_info_compression/*
 
 env_gen/*
+
+venv/*

@@ -31,11 +31,7 @@ pathfinder = require('mineflayer-pathfinder')
 collectBlock = require('mineflayer-collectblock')
 pvp = require("mineflayer-pvp").plugin
 Vec3 = require("vec3")
-
-if system_type == 'linux':
-    minecraftHawkEye = require("minecrafthawkeye").default
-else:
-    minecraftHawkEye = require("minecrafthawkeye")
+minecraftHawkEye = require("minecrafthawkeye").default
 
 mineflayerViewer = require('prismarine-viewer').mineflayer
 Socks = require("socks5-client")
@@ -65,12 +61,12 @@ mount_state = False
 def log_activity(bot):
     def decorator(func):
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*call_args, **kwargs):
             # 在函数执行前打印
             # bot.chat(f"{bot.username} is going to do task: {func.__name__}")
             try:
                 # 执行函数
-                result = func(*args, **kwargs) # 这里可以增加更多的反馈信息
+                result = func(*call_args, **kwargs) # 这里可以增加更多的反馈信息
                 # 在函数执行后打印(\1\n@log)
                 # bot.chat(f"{bot.username} has done task: {func.__name__}")
                 return result
@@ -95,6 +91,7 @@ def log_activity(bot):
                 bot.loadPlugin(pvp)
                 bot.loadPlugin(minecraftHawkEye)
                 # 这里改成重新启动bot
+                return jsonify({'message': f"Exception in task {func.__name__}: {str(e)}", 'status': False, "new_events": []})
 
         return wrapper
     return decorator

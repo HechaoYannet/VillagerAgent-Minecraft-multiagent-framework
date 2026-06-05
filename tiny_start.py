@@ -7,22 +7,27 @@ from pipeline.controller import GlobalController
 from pipeline.data_manager import DataManager
 from pipeline.task_manager import TaskManager
 import json
+
+api_key_list = json.load(open("API_KEY_LIST", "r"))["AGENT_KEY"]
+LLM_API_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+LLM_API_MODEL = "qwen3-next-80b-a3b-instruct"
+MINECRAFT_HOST = "localhost"
+MINECRAFT_PORT = 25565
+
 if __name__ == "__main__":
 
     # Set Environment
-    env = VillagerBench(env_type.none, task_id=0, _virtual_debug=False, dig_needed=False, host="10.214.180.148")
+    env = VillagerBench(env_type.none, task_id=0, _virtual_debug=False, dig_needed=False, host=MINECRAFT_HOST, port=MINECRAFT_PORT)
 
     # Set Agent
-    api_key_list = json.load(open("API_KEY_LIST", "r"))["AGENT_KEY"] # use OPENAI as an example
-    base_url = "https://api.chatanywhere.tech/v1"
     llm_config = {
-        "api_model": "gpt-4o-mini", # for example, "gpt-4-1106-preview"
-        "api_base": base_url, # for example, "https://api.openai.com/v1"
+        "api_model": LLM_API_MODEL,
+        "api_base": LLM_API_BASE,
         "api_key_list": api_key_list
     }
 
-    Agent.model = "gpt-4-1106-preview"
-    Agent.base_url = base_url
+    Agent.model = LLM_API_MODEL
+    Agent.base_url = LLM_API_BASE
     Agent.api_key_list = api_key_list
 
     # more agent tools can be added here you can refer to the agent_tool in doc/api_library.md

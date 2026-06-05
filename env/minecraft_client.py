@@ -18,6 +18,7 @@ from functools import wraps
 import os
 import random
 import platform
+import sys
 
 env = os.environ.copy()
 env["PYTHONIOENCODING"] = "utf-8"
@@ -282,6 +283,16 @@ class Agent():
             return {'message': 'Exception', 'status': False}
 
     @staticmethod
+    def wait_until_ready(player_name: str, timeout: int = 120, interval: float = 1.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            ping_result = Agent.ping(player_name)
+            if ping_result.get("status"):
+                return True
+            time.sleep(interval)
+        return False
+
+    @staticmethod
     def launch(host="10.21.31.18", port=25565, world="world", verbose=False, ignore_name=[], debug=False, fast=False):
         Agent.port = port
         if verbose:
@@ -292,19 +303,19 @@ class Agent():
             if fast:
                 try:
                     Agent.agent_process[key] = subprocess.Popen(
-                        ["python", "env/minecraft_server_fast.py", "-H", host, "-P", str(port), "-LP", str(value), "-U", key, "-W",
+                        [sys.executable, "env/minecraft_server_fast.py", "-H", host, "-P", str(port), "-LP", str(value), "-U", key, "-W",
                     world, "-D", str(debug)], shell=False, env=env)
-                    print(f"python env/minecraft_server_fast.py -H \"{host}\" -P {port} -LP {value} -U \"{key}\" -W \"{world}\" -D {debug}")
+                    print(f"{sys.executable} env/minecraft_server_fast.py -H \"{host}\" -P {port} -LP {value} -U \"{key}\" -W \"{world}\" -D {debug}")
                 except Exception as e:
                     print(f"An error occurred: {e}")
-                    print(f"python env/minecraft_server_fast.py -H \"{host}\" -P {port} -LP {value} -U \"{key}\" -W \"{world}\" -D {debug}")
-                time.sleep(10)
+                    print(f"{sys.executable} env/minecraft_server_fast.py -H \"{host}\" -P {port} -LP {value} -U \"{key}\" -W \"{world}\" -D {debug}")
             else:
                 Agent.agent_process[key] = subprocess.Popen(
-                    ["python", "env/minecraft_server.py", "-H", host, "-P", str(port), "-LP", str(value), "-U", key, "-W",
+                    [sys.executable, "env/minecraft_server.py", "-H", host, "-P", str(port), "-LP", str(value), "-U", key, "-W",
                  world, "-D", str(debug)], shell=False, env=env)
-                print(f"python env/minecraft_server.py -H \"{host}\" -P {port} -LP {value} -U \"{key}\" -W \"{world}\" -D {debug}")
-                time.sleep(2)
+                print(f"{sys.executable} env/minecraft_server.py -H \"{host}\" -P {port} -LP {value} -U \"{key}\" -W \"{world}\" -D {debug}")
+            if not Agent.wait_until_ready(key):
+                raise TimeoutError(f"Agent server for {key} did not become ready on localhost:{value}.")
         if verbose:
             print("launch done.")
 
