@@ -36,7 +36,7 @@ minecraftHawkEye = require("minecrafthawkeye").default
 mineflayerViewer = require('prismarine-viewer').mineflayer
 Socks = require("socks5-client")
 minecraftData = require('minecraft-data')
-mcData = minecraftData('1.19.2')
+mcData = minecraftData('1.21.1')
 # print(mcData.itemsByName['yellow_carpet'])
 bot = mineflayer.createBot({
     "host": args.host,
@@ -44,7 +44,7 @@ bot = mineflayer.createBot({
     'username': args.username.replace(' ', '_'),
     'checkTimeoutInterval': 600000,
     'auth': 'offline',
-    'version': '1.19.2',
+    'version': '1.21.1',
 })
 Item = require("prismarine-item")(bot.registry)
 
@@ -82,7 +82,7 @@ def log_activity(bot):
                     'username': args.username.replace(' ', '_'),
                     'checkTimeoutInterval': 600000,
                     'auth': 'offline',
-                    'version': '1.19.2',
+                    'version': '1.21.1',
                 })
                 Item = require("prismarine-item")(bot.registry)
 

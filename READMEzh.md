@@ -38,7 +38,7 @@ Click here to view the [English version of the README](README.md).
   ```python
   python js_setup.py
   ```
-- **Minecraft服务器**：如果您想了解如何配置Minecraft 1.19.2服务器，请参阅[这里的教程](#minecraft-1192服务器配置)。
+- **Minecraft服务器**：如果您想了解如何配置Minecraft 1.21.1服务器，请参阅[这里的教程](#minecraft-1211服务器配置)。
 
 - **Python依赖项**：安装`requirements.txt`文件中指定的所有必要Python库。您可以使用以下命令安装这些依赖项：
   ```
@@ -213,25 +213,25 @@ if __name__ == "__main__":
      ```
    - 如果安装成功，你将看到输出的Node.js和npm的版本号。
 
-## Minecraft 1.19.2服务器配置
+## Minecraft 1.21.1服务器配置
 ### 准备工作
 
 1. **确保Java安装**：Minecraft服务器需要Java运行环境。请确保您的计算机上安装了最新版本的Java。可以在命令行中运行 `java -version` 来检查Java是否已安装。
 
-2. **下载服务器文件**：访问Minecraft官方网站下载1.19.2版本的服务器文件（`minecraft_server.1.19.2.jar`）。
+2. **下载服务器文件**：访问Minecraft官方网站下载1.21.1版本的服务器文件（`minecraft_server.1.21.1.jar`）。
 
 ### 配置服务器
 
 1. **创建服务器文件夹**：在您的计算机上选择一个位置创建一个新文件夹，用于存放Minecraft服务器的所有文件。
 
-2. **移动服务器文件**：将下载的服务器文件（`minecraft_server.1.19.2.jar`）移动到您创建的文件夹中。
+2. **移动服务器文件**：将下载的服务器文件（`minecraft_server.1.21.1.jar`）移动到您创建的文件夹中。
 
 3. **运行服务器**：
    - 打开命令行界面。
    - 使用 `cd` 命令导航到包含服务器文件的文件夹。
    - 运行以下命令启动服务器：
      ```
-     java -Xmx1024M -Xms1024M -jar minecraft_server.1.19.2.jar nogui
+     java -Xmx1024M -Xms1024M -jar minecraft_server.1.21.1.jar nogui
      ```
    - 这里的 `-Xmx1024M` 和 `-Xms1024M` 参数分别设置了服务器的最大和初始内存分配（以MB为单位）。根据您的服务器硬件，您可能需要调整这些值。
 

@@ -233,7 +233,7 @@ def split_structure(building):
     model = LLMEmbedder('BAAI/llm-embedder', use_fp16=True)
 
     minecraftData = require('minecraft-data')
-    mcData = minecraftData('1.19.2')
+    mcData = minecraftData('1.21.1')
     # 创建一个MinMaxScaler对象
     scaler = MinMaxScaler()
 

@@ -140,7 +140,7 @@ Customize your private tasks in your Minecraft server with our VillagerAgent mul
   - Google Cloud (for access to models like Gemini)
   - Zhipu AI (for access to GLM models)
 - **Node.js and npm**: Node Package Manager (npm) installed, which is typically included with Node.js.
-- **Minecraft Server**: A Minecraft 1.19.2 server running locally or on a reachable host. For local quickstart, use `localhost:25565`. If you want to know how to configure the Minecraft 1.19.2 server, please see the [tutorial here](#minecraft-1192-server-setup).
+- **Minecraft Server**: A Minecraft 1.21.1 server running locally or on a reachable host. For local quickstart, use `localhost:25565`. If you want to know how to configure the Minecraft 1.21.1 server, please see the [tutorial here](#minecraft-1211-server-setup).
 - **Python Dependencies**: Install all necessary Python libraries as specified in the `requirements.txt` file. You can install these dependencies using the following command:
   ```
   pip install -r requirements.txt
@@ -174,7 +174,7 @@ Customize your private tasks in your Minecraft server with our VillagerAgent mul
 
 ## QuickStart 🚀
 
-1. Start a Minecraft 1.19.2 server and make sure it is reachable at `localhost:25565`.
+1. Start a Minecraft 1.21.1 server and make sure it is reachable at `localhost:25565`.
 2. Run the minimal example:
    ```bash
    python tiny_start.py
@@ -282,25 +282,25 @@ Meet VillagerAgent, our multi-agent maestro 🎼, orchestrating a symphony of ta
    - If the installation was successful, you will see the version numbers of Node.js and npm displayed.
 
 
-## Minecraft 1.19.2 Server Setup
+## Minecraft 1.21.1 Server Setup
 ### Preparation
 
 1. **Ensure Java is Installed**: Minecraft servers require the Java runtime environment. Make sure you have the latest version of Java installed on your computer. You can check if Java is installed by running `java -version` in the command line.
 
-2. **Download Server File**: Visit the official Minecraft website to download the 1.19.2 version of the server file (`minecraft_server.1.19.2.jar`).
+2. **Download Server File**: Visit the official Minecraft website to download the 1.21.1 version of the server file (`minecraft_server.1.21.1.jar`).
 
 ### Configuring the Server
 
 1. **Create a Server Folder**: Choose a location on your computer to create a new folder that will hold all the Minecraft server files.
 
-2. **Move Server File**: Move the downloaded server file (`minecraft_server.1.19.2.jar`) into the folder you created.
+2. **Move Server File**: Move the downloaded server file (`minecraft_server.1.21.1.jar`) into the folder you created.
 
 3. **Run the Server**:
    - Open the command line interface.
    - Navigate to the folder containing the server file using the `cd` command.
    - Run the following command to start the server:
      ```
-     java -Xmx1024M -Xms1024M -jar minecraft_server.1.19.2.jar nogui
+     java -Xmx1024M -Xms1024M -jar minecraft_server.1.21.1.jar nogui
      ```
    - The `-Xmx1024M` and `-Xms1024M` parameters set the maximum and initial memory allocation for the server in megabytes (MB). You may need to adjust these values based on your server's hardware.
 
