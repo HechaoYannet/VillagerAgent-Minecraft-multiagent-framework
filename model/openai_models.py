@@ -6,8 +6,13 @@ import openai
 from openai import OpenAI
 import tiktoken
 from model.abstract_language_model import AbstractLanguageModel
+from model.retry_utils import RetryConfig, sync_retry, CircuitBreaker, RetryExhausted, CircuitBreakerOpen
 import json
-from retry import retry
+# retry 包可能未安装 — 使用内置的 retry_with_backoff 作为回退
+try:
+    from retry import retry
+except ImportError:
+    from model.retry_utils import retry_with_backoff as retry
 import random
 import httpx
 import base64
@@ -247,20 +252,311 @@ class OpenAILanguageModel(AbstractLanguageModel):
         # logger.info("streaming api")
         start_time = time.time()
         content = ""
+        reasoning = ""
+        tool_calls_accumulated = {}
         # print(messages)
         stream = self.client.chat.completions.create(
             model=model,
             messages=messages,
             stream=True,
             temperature=temperature,
+            stream_options={"include_reasoning": True}
+            if self._supports_reasoning(model)
+            else {},
             **self._qwen_non_thinking_kwargs(model),
         )
         for chunk in stream:
-            if chunk.choices[0].delta.content is not None:
-                # print(chunk.choices[0].delta.content, end="")
-                content += chunk.choices[0].delta.content
+            if chunk.choices and len(chunk.choices) > 0:
+                delta = chunk.choices[0].delta
+                if delta.content is not None:
+                    content += delta.content
+                # DeepSeek v4 reasoning_content
+                if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                    reasoning += delta.reasoning_content
+                # Tool calls in stream
+                if hasattr(delta, 'tool_calls') and delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        idx = tc.index
+                        if idx not in tool_calls_accumulated:
+                            tool_calls_accumulated[idx] = {
+                                'id': '', 'name': '', 'arguments': ''
+                            }
+                        if tc.id:
+                            tool_calls_accumulated[idx]['id'] = tc.id
+                        if tc.function:
+                            if tc.function.name:
+                                tool_calls_accumulated[idx]['name'] += tc.function.name
+                            if tc.function.arguments:
+                                tool_calls_accumulated[idx]['arguments'] += tc.function.arguments
         logger.debug(f"Time taken: {time.time() - start_time}")
+        # Store reasoning for later retrieval
+        if reasoning:
+            self._last_reasoning = reasoning
+        # Store tool calls for later retrieval
+        if tool_calls_accumulated:
+            self._last_tool_calls = list(tool_calls_accumulated.values())
         return content
+
+    def _supports_reasoning(self, model: str) -> bool:
+        """检测模型是否支持 reasoning_content"""
+        model_lower = (model or self.api_model or "").lower()
+        return any(name in model_lower for name in [
+            "deepseek-v4", "deepseek-v3", "deepseek-r1", "deepseek-reasoner",
+            "qwen3", "o1", "o3", "o4",
+        ])
+
+    def chat_with_tools(
+        self,
+        messages: list,
+        tools: list,
+        model: str = "",
+        temperature: float = 0.0,
+        tool_choice: str = "auto",
+        max_tokens: int = 4096,
+    ) -> dict:
+        """
+        Phase 3: 原生工具调用 (OpenAI function calling)
+
+        替代 LangChain ReAct，使用 OpenAI 原生的 tool calling 协议。
+
+        Args:
+            messages: 消息列表 [{"role": "system/user/assistant/tool", "content": ...}]
+            tools: 工具定义列表 (OpenAI JSON Schema 格式)
+            model: 模型名称
+            temperature: 采样温度
+            tool_choice: 工具调用策略 ("auto", "none", "required")
+            max_tokens: 最大输出 token
+
+        Returns:
+            {
+                "type": "text" | "tool_calls",
+                "content": str | None,
+                "reasoning": str | None,
+                "tool_calls": [{"id": str, "name": str, "arguments": dict}] | None,
+                "usage": {"prompt_tokens": int, "completion_tokens": int} | None,
+            }
+        """
+        if not model:
+            model = self.api_model
+
+        self.client = OpenAI(
+            api_key=random.choice(self.api_key_list) if len(self.api_key_list) > 0 else self.api_key,
+            base_url=self.api_base,
+            max_retries=5,
+        )
+
+        api_params = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            **self._qwen_non_thinking_kwargs(model),
+        }
+
+        # 添加工具定义
+        if tools:
+            api_params["tools"] = tools
+            api_params["tool_choice"] = tool_choice
+
+        start_time = time.time()
+
+        try:
+            completion = self.client.chat.completions.create(**api_params)
+        except Exception as e:
+            logger.error(f"Tool calling API error: {e}")
+            raise
+
+        logger.debug(f"Tool calling time: {time.time() - start_time:.2f}s")
+
+        choice = completion.choices[0]
+        message = choice.message
+
+        # 提取 reasoning_content (DeepSeek v4)
+        reasoning = getattr(message, "reasoning_content", None)
+
+        # 判断响应类型
+        if hasattr(message, "tool_calls") and message.tool_calls:
+            tool_calls = []
+            for tc in message.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments)
+                except (json.JSONDecodeError, AttributeError):
+                    args = {}
+                tool_calls.append({
+                    "id": tc.id,
+                    "name": tc.function.name,
+                    "arguments": args,
+                })
+            return {
+                "type": "tool_calls",
+                "content": message.content,
+                "reasoning": reasoning,
+                "tool_calls": tool_calls,
+                "usage": {
+                    "prompt_tokens": completion.usage.prompt_tokens if completion.usage else 0,
+                    "completion_tokens": completion.usage.completion_tokens if completion.usage else 0,
+                },
+            }
+        else:
+            return {
+                "type": "text",
+                "content": message.content,
+                "reasoning": reasoning,
+                "tool_calls": None,
+                "usage": {
+                    "prompt_tokens": completion.usage.prompt_tokens if completion.usage else 0,
+                    "completion_tokens": completion.usage.completion_tokens if completion.usage else 0,
+                },
+            }
+
+    def agent_loop_with_tools(
+        self,
+        system_prompt: str,
+        user_message: str,
+        tools: list,
+        tool_handler: callable,
+        max_steps: int = 15,
+        temperature: float = 0.0,
+        model: str = "",
+        stream_callback: callable = None,
+    ) -> dict:
+        """
+        Phase 3: 完整的工具调用循环 (替代 LangChain ReAct Agent)
+
+        实现标准 OpenAI tool calling 循环:
+        1. 发送 system + user + tools → LLM
+        2. 若 LLM 返回 tool_calls → 执行工具 → 添加结果到消息 → 回到步骤 1
+        3. 若 LLM 返回 text → 返回最终结果
+
+        Args:
+            system_prompt: 系统提示词
+            user_message: 用户消息
+            tools: 工具定义列表 (OpenAI JSON Schema)
+            tool_handler: 工具执行函数 func(name, arguments) -> dict
+            max_steps: 最大工具调用步数
+            temperature: 温度
+            model: 模型名称
+            stream_callback: 流式回调 func(chunk: dict) (可选)
+
+        Returns:
+            {
+                "success": bool,
+                "final_answer": str,
+                "steps": [{"tool": str, "arguments": dict, "result": dict}],
+                "total_usage": {"prompt_tokens": int, "completion_tokens": int},
+            }
+        """
+        if not model:
+            model = self.api_model
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ]
+
+        steps = []
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+
+        for step in range(max_steps):
+            response = self.chat_with_tools(
+                messages=messages,
+                tools=tools,
+                model=model,
+                temperature=temperature,
+            )
+
+            # 累计 token 用量
+            if response.get("usage"):
+                total_prompt_tokens += response["usage"]["prompt_tokens"]
+                total_completion_tokens += response["usage"]["completion_tokens"]
+
+            if stream_callback:
+                stream_callback({
+                    "step": step + 1,
+                    "type": response["type"],
+                    "reasoning": response.get("reasoning"),
+                })
+
+            # 文本响应 = 最终回答
+            if response["type"] == "text":
+                return {
+                    "success": True,
+                    "final_answer": response["content"],
+                    "steps": steps,
+                    "total_usage": {
+                        "prompt_tokens": total_prompt_tokens,
+                        "completion_tokens": total_completion_tokens,
+                    },
+                }
+
+            # 工具调用 = 执行并继续
+            if response["type"] == "tool_calls" and response["tool_calls"]:
+                # 添加 assistant 消息 (包含 tool_calls)
+                assistant_msg = {"role": "assistant", "content": response.get("content")}
+                if response["tool_calls"]:
+                    assistant_msg["tool_calls"] = [
+                        {
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {
+                                "name": tc["name"],
+                                "arguments": json.dumps(tc["arguments"], ensure_ascii=False),
+                            },
+                        }
+                        for tc in response["tool_calls"]
+                    ]
+                messages.append(assistant_msg)
+
+                # 执行每个工具调用
+                for tc in response["tool_calls"]:
+                    try:
+                        result = tool_handler(tc["name"], tc["arguments"])
+                    except Exception as e:
+                        result = {"status": False, "message": str(e)}
+
+                    steps.append({
+                        "tool": tc["name"],
+                        "arguments": tc["arguments"],
+                        "result": result,
+                    })
+
+                    if stream_callback:
+                        stream_callback({
+                            "step": step + 1,
+                            "type": "tool_executed",
+                            "tool": tc["name"],
+                            "arguments": tc["arguments"],
+                            "result": result,
+                        })
+
+                    # 添加 tool 响应消息
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": json.dumps(result, ensure_ascii=False),
+                    })
+
+                continue
+
+        # 达到最大步数
+        return {
+            "success": False,
+            "final_answer": f"任务在 {max_steps} 步内未完成。",
+            "steps": steps,
+            "total_usage": {
+                "prompt_tokens": total_prompt_tokens,
+                "completion_tokens": total_completion_tokens,
+            },
+        }
+
+    def get_last_reasoning(self) -> str:
+        """获取最近一次流式调用中的 reasoning_content"""
+        return getattr(self, '_last_reasoning', '')
+
+    def get_last_tool_calls(self) -> list:
+        """获取最近一次流式调用中的 tool calls"""
+        return getattr(self, '_last_tool_calls', [])
 
     def filter_emoji(self, text: str) -> str:
         ret_str = []

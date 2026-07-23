@@ -11,8 +11,11 @@ build/
 # Virtual environments
 venv/
 .venv/
-env/
 .env
+
+# Note: env/ is NOT a virtualenv — it contains core Minecraft integration source code.
+# Only ignore if it contains a pyvenv.cfg (virtualenv marker)
+env/pyvenv.cfg
 
 # IDE
 .vscode/
