@@ -8,11 +8,17 @@ import random
 try:
     from retry import retry
 except ImportError:
-    from model.retry_utils import retry_with_backoff as retry
-import google.generativeai as genai
+    from src.llm.retry import retry_with_backoff as retry
+
+try:
+    import google.generativeai as genai
+    _GOOGLE_AI_AVAILABLE = True
+except ImportError:
+    genai = None
+    _GOOGLE_AI_AVAILABLE = False
 
 from model.abstract_language_model import AbstractLanguageModel
-from model.utils import extract_info
+from src.utils.serialize import extract_info
 
 logging.basicConfig(
     level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s"
