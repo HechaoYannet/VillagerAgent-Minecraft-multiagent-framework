@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # 主服务：VillagerAgent 核心
+  villager-core:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: villager-agent
+    restart: unless-stopped
+    secrets:
+      - api_keys
+    volumes:
+      # 持久化数据
+      - ../data/world:/app/data/world
+      - ../logs:/app/logs
+      - ../config:/app/config:ro
+    environment:
+      - MINECRAFT_HOST=${MINECRAFT_HOST:-localhost}
+      - MINECRAFT_PORT=${MINECRAFT_PORT:-25565}
+      - VILLAGER_ENV=production
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    networks:
+      - villager-net
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # 向量数据库：ChromaDB (长期记忆)
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: villager-chromadb
+    restart: unless-stopped
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=FALSE
+    ports:
+      - "8001:8000"
+    networks:
+      - villager-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  chroma_data:
+    driver: local
+
+networks:
+  villager-net:
+    driver: bridge
+
+secrets:
+  api_keys:
+    file: ../config/secrets.yaml

@@ -1,0 +1,67 @@
+# ===========================================
+# VillagerAgent 默认配置
+# ===========================================
+
+# Minecraft 服务器连接
+minecraft:
+  host: "localhost"
+  port: 25565
+  version: "1.21.1"
+  auth: "offline"  # offline | microsoft
+
+# Agent 配置
+agents:
+  default_count: 1
+  default_name_prefix: "伙伴"
+  op_on_join: true
+  idle_behavior: "wander"  # wander | stay | follow
+  omniscient_vision: false
+
+# LLM 配置
+llm:
+  provider: "deepseek"  # deepseek | openai | gemini
+  model: "deepseek-v4"
+  api_base: "https://api.deepseek.com/v1"
+  max_tokens: 4096
+  temperature: 0.7
+  stream: true
+  enable_thinking: true  # 启用 DeepSeek v4 思考 tokens
+
+# 记忆
+memory:
+  short_term_size: 100
+  long_term_enabled: true
+  vector_db: "chromadb"  # chromadb | faiss
+  world_config_dir: "data/world"
+
+# Web 管理后台
+web:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  username: "admin"
+  # password 在 secrets.yaml 中设置
+
+# 日志
+logging:
+  level: "INFO"  # DEBUG | INFO | WARNING | ERROR
+  structured: true
+  retention_days: 30
+  llm_debug: false
+
+# 热重载
+hot_reload:
+  enabled: false
+  github_repo: ""
+  branch: "main"
+  check_interval_seconds: 300
+
+# Token 配额
+quota:
+  enabled: true
+  daily_limit: 1000000
+  hourly_limit: 100000
+  warn_threshold: 0.8
+
+# 语言
+language: "zh-CN"

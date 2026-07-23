@@ -1,0 +1,16 @@
+{
+  "name": "villager-agent-js-bridge",
+  "version": "2.0.0",
+  "description": "Node.js Mineflayer bridge for VillagerAgent Minecraft companion system",
+  "main": "index.js",
+  "dependencies": {
+    "mineflayer": "^5.0.0",
+    "minecraft-data": "^3.50.0",
+    "mineflayer-pathfinder": "^2.4.12",
+    "mineflayer-collectblock": "^1.4.1",
+    "mineflayer-pvp": "^1.3.2",
+    "minecrafthawkeye": "^1.3.9",
+    "prismarine-viewer": "^1.28.0",
+    "vec3": "^0.1.10"
+  }
+}

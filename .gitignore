@@ -1,64 +1,93 @@
-logs/*
-data/history/*
-*/__pycache__/*
-*/.DS_Store
-*test*
-atom_generator.py
-.idea
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
 
-openai_api_key.txt
+# Virtual environments
+venv/
+.venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sensitive files
 API_KEY_LIST
+config/secrets.yaml
+*.pem
+*.key
+openai_api_key.txt
 google_api_key.txt
 zhipu_api_key.txt
 
+# Runtime files
+.cache/
+logs/
+data/score.json
+data/action_log.json
+data/tokens.json
+data/llm_inference.json
+data/history.json
+data/env.json
+data/agent.json
+data/experience.json
+data/url_prefix.json
+data/blueprint_description.json
+data/recipe_hint.json
+data/map_description.json
+data/map.json
 data/openai.logs
 data/google.logs
 data/zhipu.logs
-
-data/agent.json
-data/experience.json
-data/env.json
-data/history.json
-data/llm_inference.json
-data/url_prefix.json
-data/score.json
-data/blueprint_description.json
-data/tokens.json
-data/recipe_hint.json
-data/action_log.json
-data/map_description.json
-data/map.json
 data/vllm.logs
+
+# Node.js
+node_modules/
+package-lock.json
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db
+*/.DS_Store
+
+# Model checkpoints
+*.pth
+*.bin
+*.safetensors
+rl_env/
+
+# ChromaDB data (local dev)
+chroma_data/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Claude
+.claude/
+
+# Misc
+tmp/
+auto_task/
+*.zip
+ui/logs/
 img/*graph.png
 img/*graph.md
-ui/logs/*
-
-result/*
-!result/*.py
-processed_result/*
-*.zip
-
-.cache/*.cache
-.cache/*.json
-
-package-lock.json
-/.vscode/*
-*config*.json
-
-/__pycache__/*
-tmp/*
-auto_task/*
-
-rl_env/ckpt/*
-rl_env/replay_buffer/*
-rl_env/tasks/*
-
-node_modules/*
+dm_info_compression/
+env_gen/
 100_meta.json
 filtered_tasks.json
-
-dm_info_compression/*
-
-env_gen/*
-
-venv/*
+*config*.json
