@@ -86,3 +86,10 @@ from src.core.tool_optimizer import (  # noqa: F401
     BEST_TOOL_FOR_BLOCK,
     CRAFTING_CHAINS,
 )
+
+# Phase 7: 结构化日志
+from src.core.structured_logging import StructuredLogger  # noqa: F401
+
+# Phase 8: Token 配额 + 热重载
+from src.core.token_quota import TokenQuotaManager, PlayerQuota  # noqa: F401
+from src.core.hot_reload import HotReloader, ReloadEvent  # noqa: F401
