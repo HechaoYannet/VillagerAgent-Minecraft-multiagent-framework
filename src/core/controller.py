@@ -53,6 +53,10 @@ class AgentConfig:
     system_prompt: str = ""
     max_tool_steps: int = 15
     enabled: bool = True
+    # Phase 4
+    world_name: str = "default"
+    memory_dir: str = "data/memory"
+    planning_enabled: bool = True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -206,6 +210,17 @@ class AgentController:
         # 初始化 LLM 客户端
         llm = init_language_model(cfg.llm)
 
+        # Phase 4: 初始化持久化记忆
+        from src.core.world_config import WorldConfig
+        from src.core.long_term_memory import LongTermMemory
+        from src.core.planning import TaskPlanner
+
+        world_config = WorldConfig(world_name=cfg.world_name)
+        await world_config.load()
+
+        long_term_memory = LongTermMemory(world_name=cfg.world_name, data_dir=cfg.memory_dir)
+        await long_term_memory.load()
+
         # 初始化工具注册表 (加载预定义 Minecraft 工具)
         tools = ToolRegistry()
         # 注册 Minecraft 工具 Schema (实际执行由 Agent → Bridge 完成)
@@ -220,6 +235,9 @@ class AgentController:
                 handler=lambda **kwargs: {"status": True, "message": "executed via bridge"},
             )
 
+        # Phase 4: 创建规划器 (需要先有 ConversationMemory, 先创建 agent 再设 planner)
+        # 简化: 在 Agent 内创建 planner
+
         # 创建 Agent
         agent = AsyncBaseAgent(
             name=name,
@@ -230,7 +248,20 @@ class AgentController:
             personality=cfg.personality,
             system_prompt=cfg.system_prompt,
             max_tool_steps=cfg.max_tool_steps,
+            world_config=world_config,
+            long_term_memory=long_term_memory,
         )
+
+        # Phase 4: 创建规划器 (需要 agent.memory)
+        if cfg.planning_enabled:
+            planner = TaskPlanner(
+                llm=llm,
+                memory=long_term_memory,
+                world_config=world_config,
+                bridge=self.bridge,
+                conversation=agent.memory,
+            )
+            agent.planner = planner
 
         # 启动 Agent (创建 asyncio Task)
         task = asyncio.create_task(agent.run(), name=f"agent-{name}")

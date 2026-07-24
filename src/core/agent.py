@@ -126,6 +126,10 @@ class AsyncBaseAgent:
         max_tool_steps: int = 15,
         stream_callback: Optional[StreamCallback] = None,
         log_dir: str = "logs",
+        # Phase 4: 持久化记忆与规划
+        world_config = None,      # WorldConfig
+        long_term_memory = None,  # LongTermMemory
+        planner = None,           # TaskPlanner
     ):
         self.name = name
         self.event_bus = event_bus
@@ -135,6 +139,11 @@ class AsyncBaseAgent:
         self.max_tool_steps = max_tool_steps
         self.stream_callback = stream_callback
 
+        # Phase 4: 持久化记忆与规划
+        self.world_config = world_config
+        self.long_term_memory = long_term_memory
+        self.planner = planner
+
         # 状态
         self.state = AgentState.IDLE
         self._interrupt_flag = asyncio.Event()
@@ -142,7 +151,7 @@ class AsyncBaseAgent:
         self._current_task: Optional[asyncio.Task] = None
         self._last_active_at = time.monotonic()
 
-        # 记忆
+        # 短期记忆
         self.memory = ConversationMemory(
             system_prompt=system_prompt,
             personality=personality or {},
@@ -321,7 +330,39 @@ class AsyncBaseAgent:
         3. LLM 返回 tool_calls → 执行 → 回到 1
         """
         user_message = event.data.get("message", "")
-        messages = self.memory.build_messages(user_message)
+        player = event.data.get("player", "")
+
+        # Phase 4: 预规划 (LLM 推理任务步骤)
+        task_plan = None
+        if self.planner and self.planner.planning_enabled:
+            try:
+                task_plan = await self.planner.plan(user_message)
+                if task_plan and task_plan.steps:
+                    self._log_state(f"计划: {task_plan.steps[0][:60]}...")
+            except Exception as e:
+                logger.debug(f"规划跳过: {e}")
+
+        # Phase 4: 注入世界知识 + 计划到系统提示词
+        world_context = ""
+        if self.world_config and self.world_config.is_loaded:
+            world_context = self.world_config.to_system_prompt()
+        if self.long_term_memory and self.long_term_memory.is_loaded:
+            mem_context = self.long_term_memory.to_system_prompt_context()
+            if mem_context:
+                world_context += "\n\n" + mem_context
+
+        messages = self.memory.build_messages(
+            user_message + ("\n\n" + task_plan.to_text() if task_plan else "")
+        )
+
+        # 注入世界知识到系统提示词
+        if world_context:
+            # 在第一条系统消息后插入世界上下文
+            sys_msg = messages[0]
+            if isinstance(sys_msg, SystemMessage):
+                messages[0] = SystemMessage(
+                    content=sys_msg.content + "\n\n" + world_context
+                )
 
         self.stats.tasks_started += 1
         tool_steps = []
@@ -368,6 +409,14 @@ class AsyncBaseAgent:
                     # REFLECTING
                     self.state = AgentState.REFLECTING
                     await self._reflect_and_respond(event, reply, tool_steps)
+
+                    # Phase 4: 记录任务完成事件
+                    if self.long_term_memory:
+                        await self.long_term_memory.record_event(
+                            f"完成任务: {user_message[:100]} → {reply[:100]}",
+                            tags=["task", "completed"],
+                            importance=3,
+                        )
 
                     self.state = AgentState.IDLE
                     self.stats.tasks_completed += 1
@@ -424,6 +473,15 @@ class AsyncBaseAgent:
                             content=json.dumps(result_dict, ensure_ascii=False),
                         ))
                         self.memory.add_tool_result(tc.id, tc.name, result_dict)
+
+                        # Phase 4: 重要工具调用记录到长期记忆
+                        if self.long_term_memory and bridge_result.status:
+                            if tc.name in ("moveTo", "mineBlock", "placeBlock", "craftItem"):
+                                await self.long_term_memory.record_event(
+                                    f"执行 {tc.name}: {bridge_result.message[:100]}",
+                                    tags=["action", tc.name],
+                                    importance=2,
+                                )
 
                     self.stats.tool_calls += len(result.tool_calls)
                     continue  # 回到 THINKING
