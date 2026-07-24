@@ -165,7 +165,7 @@ class AgentController:
 
         logger.info("AgentController 已关闭")
 
-    async def run_forever(self):
+    async def run_forever(self, hot_reload_config: dict = None):
         """启动所有已配置的 Agent 并持续运行直到 shutdown"""
         await self.start()
 
@@ -173,6 +173,20 @@ class AgentController:
         for name, config in self._agent_configs.items():
             if config.enabled:
                 await self.start_agent(name, config)
+
+        # Phase 8: 热重载 (如果配置了 GitHub 仓库)
+        if hot_reload_config and hot_reload_config.get("enabled"):
+            from src.core.hot_reload import HotReloader
+            self._hot_reloader = HotReloader(
+                repo_url=hot_reload_config.get("github_repo", ""),
+                branch=hot_reload_config.get("branch", "main"),
+                event_bus=self.event_bus,
+                controller=self,
+            )
+            await self._hot_reloader.start(
+                check_interval=hot_reload_config.get("check_interval_seconds", 300)
+            )
+            logger.info("热重载已启用")
 
         # 等待 shutdown 信号
         await self._shutdown_event.wait()
@@ -286,6 +300,20 @@ class AgentController:
                 conversation=agent.memory,
             )
             agent.planner = planner
+
+        # Phase 7: 结构化日志
+        from src.core.structured_logging import StructuredLogger
+        structured_log = StructuredLogger(agent_name=name)
+        agent.structured_log = structured_log
+        await structured_log.startup()
+
+        # Phase 8: Token 配额 (如果启用)
+        token_quota = None
+        if cfg.llm.get("quota_enabled", True):
+            from src.core.token_quota import TokenQuotaManager
+            token_quota = TokenQuotaManager()
+            await token_quota.load()
+            agent.token_quota = token_quota
 
         # 启动 Agent (创建 asyncio Task)
         task = asyncio.create_task(agent.run(), name=f"agent-{name}")

@@ -181,6 +181,8 @@ async def api_send_command(name: str, request: Request):
 
     if not message:
         return JSONResponse({"error": "消息不能为空"}, status_code=400)
+    if len(message) > 2000:
+        return JSONResponse({"error": "消息过长 (最大 2000 字符)"}, status_code=400)
 
     # 通过 EventBus 发送 USER_INPUT
     from src.core.event_bus import make_user_input
@@ -193,6 +195,9 @@ async def api_send_command(name: str, request: Request):
 @app.get("/api/logs/actions")
 async def api_get_action_logs(agent: str = "", limit: int = 50):
     """获取动作日志"""
+    # 路径遍历保护
+    if agent and (".." in agent or "/" in agent or "\\" in agent):
+        return JSONResponse({"error": "非法 agent 名称"}, status_code=400)
     try:
         log_dir = f"logs/agent/{agent or 'default'}"
         path = os.path.join(log_dir, "actions.jsonl")

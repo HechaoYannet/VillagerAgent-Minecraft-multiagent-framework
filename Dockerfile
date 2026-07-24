@@ -1,23 +1,38 @@
-FROM python:3.10.13
-LABEL authors=""
+# VillagerAgent 2.0 — Production Docker Image
+# 构建: docker build -t villager-agent .
+# 运行: docker-compose -f docker/docker-compose.yml up
 
-RUN apt update
-RUN apt install -y nodejs=18.19.0+dfsg-6~deb12u1
-RUN apt install -y npm
+FROM python:3.11-slim
 
-ADD ./requirements.txt ./requirements.txt
+LABEL maintainer="VillagerAgent"
+LABEL description="Minecraft AI Companion System — Phase 0-8"
 
-RUN pip install pip -U
-RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
-RUN pip install -r requirements.txt
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl gnupg git \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-ADD ./js_setup.py ./js_setup.py
+WORKDIR /app
 
-RUN python js_setup.py
+# Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN mkdir /VILLAGER/
-ADD . /VILLAGER/
+# Node.js dependencies (Mineflayer bridge)
+COPY js_bridge/package.json js_bridge/
+RUN cd js_bridge && npm install --production && cd ..
 
-WORKDIR /VILLAGER/
+# Application code
+COPY . .
 
-ENTRYPOINT python run.py
+# Directories
+RUN mkdir -p logs data/world data/memory .cache config
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
+
+ENTRYPOINT ["python", "main.py"]

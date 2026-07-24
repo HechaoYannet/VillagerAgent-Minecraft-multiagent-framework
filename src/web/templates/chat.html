@@ -31,7 +31,14 @@ function sendMessage() {
     const agent = document.getElementById('agent-select').value;
     const box = document.getElementById('chat-box');
 
-    box.innerHTML += `<div class="chat-msg chat-outgoing"><div class="chat-sender">你 → ${agent}</div>${msg}</div>`;
+    const div = document.createElement('div');
+    div.className = 'chat-msg chat-outgoing';
+    const sender = document.createElement('div');
+    sender.className = 'chat-sender';
+    sender.textContent = `你 → ${agent}`;
+    div.appendChild(sender);
+    div.appendChild(document.createTextNode(msg));
+    box.appendChild(div);
     input.value = '';
     box.scrollTop = box.scrollHeight;
 

@@ -65,3 +65,13 @@ quota:
 
 # 语言
 language: "zh-CN"
+
+# Minecraft Bridge 模式
+# real: 连接真实 Minecraft 服务器 (需要 Flask 服务器运行在 minecraft_server.py)
+# mock: 模拟 Minecraft 世界 (测试/开发)
+# disabled: 纯 LLM 模式 (无 Minecraft 交互)
+bridge:
+  mode: "disabled"
+  flask_port: 5000
+  world_poll_interval: 5.0
+  chat_poll_interval: 1.0
