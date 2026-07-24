@@ -35,6 +35,9 @@ zhipu_api_key.txt
 # Runtime files
 .cache/
 logs/
+*.jsonl
+data/memory/
+TEST_CHECKLIST.md
 data/score.json
 data/action_log.json
 data/tokens.json
