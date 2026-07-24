@@ -263,6 +263,7 @@ class EventBus:
         """
         future: asyncio.Future = asyncio.get_event_loop().create_future()
         self._pending_requests[event.id] = future
+        future.add_done_callback(lambda f: self._pending_requests.pop(event.id, None))
         await self.publish(event)
         return future
 

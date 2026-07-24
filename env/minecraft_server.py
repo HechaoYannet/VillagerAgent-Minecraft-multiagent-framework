@@ -1743,7 +1743,109 @@ class Bot():
         self.existing_time += 1
 
 info_bot = Bot()
-# app.run(port=local_port, debug=False)  # 等待bot加载完成 (bot加载完成后会发送spawn事件)
+
+# ── Phase 2 Bridge API ───────────────────────────────────────────────────
+# 为 Phase 2 MinecraftBridge (src/core/bridge.py) 提供统一的 REST API
+
+@app.route('/api/world', methods=['GET'])
+def api_world():
+    """返回世界状态 (Phase 2 Bridge 兼容)"""
+    try:
+        env = get_envs_info_dict(bot, RENDER_DISTANCE=32)
+        return jsonify(env)
+    except Exception as e:
+        return jsonify({'status': False, 'message': str(e)}), 500
+
+
+@app.route('/api/action', methods=['POST'])
+def api_action():
+    """统一工具调用分发 (Phase 2 Bridge 兼容)"""
+    data = request.get_json()
+    tool_name = data.get('tool', '')
+    args = data.get('args', {})
+
+    # 工具名 → Flask 路由映射
+    route_map = {
+        'moveTo': '/post_move_to',
+        'mineBlock': '/post_dig',
+        'placeBlock': '/post_place',
+        'getInventory': '/post_environment_dict',
+        'getWorldInfo': '/post_environment_dict',
+        'scanNearbyEntities': '/post_entity',
+        'scanNearbyBlocks': '/post_environment',
+        'findBlock': '/post_find',
+        'equipItem': '/post_equip',
+        'attackEntity': '/post_attack',
+        'openChest': '/post_open',
+        'interactBlock': '/post_use_on',
+        'craftItem': '/post_craft',
+        'smeltItem': '/post_smelt',
+        'finalAnswer': '/post_done',
+        'wait': '/post_wait_for_feedback',
+        'sendChat': '/post_chat',
+    }
+
+    target_route = route_map.get(tool_name)
+    if not target_route:
+        return jsonify({
+            'status': False,
+            'message': f'未知工具: {tool_name}。支持: {list(route_map.keys())}',
+        }), 400
+
+    # 参数转换 (统一 args → 各路由需要的格式)
+    param_map = {
+        'moveTo': lambda a: {'x': a.get('x', 0), 'y': a.get('y', 64), 'z': a.get('z', 0)},
+        'mineBlock': lambda a: {'x': a.get('x', 0), 'y': a.get('y', 0), 'z': a.get('z', 0)},
+        'placeBlock': lambda a: {
+            'block_name': a.get('block_name', 'dirt'),
+            'x': a.get('x', 0), 'y': a.get('y', 0), 'z': a.get('z', 0),
+        },
+        'attackEntity': lambda a: {'name': a.get('entity_name', '')},
+        'findBlock': lambda a: {'name': a.get('block_name', '')},
+        'equipItem': lambda a: {'name': a.get('item_name', '')},
+        'openChest': lambda a: {'x': a.get('x', 0), 'y': a.get('y', 0), 'z': a.get('z', 0)},
+        'interactBlock': lambda a: {'name': a.get('x', 0)},
+        'craftItem': lambda a: {'name': a.get('item_name', ''), 'num': a.get('count', 1)},
+        'smeltItem': lambda a: {'name': a.get('input_item', ''), 'num': a.get('count', 1)},
+        'sendChat': lambda a: {'msg': a.get('message', '')},
+        'finalAnswer': lambda a: {'final_answer': a.get('summary', '任务完成')},
+        'wait': lambda a: {'seconds': a.get('seconds', 1)},
+    }
+
+    transformed = param_map.get(tool_name, lambda a: a)(args)
+
+    # 使用 Flask 测试客户端调用目标路由
+    with app.test_client() as client:
+        resp = client.post(target_route, json=transformed)
+        result = resp.get_json() if resp.status_code == 200 else {'status': False, 'message': str(resp.data)}
+        result['tool'] = tool_name
+        return jsonify(result)
+
+
+@app.route('/api/chat/send', methods=['POST'])
+def api_chat_send():
+    """发送聊天消息 (Phase 2 Bridge 兼容)"""
+    data = request.get_json()
+    msg = data.get('message', data.get('msg', ''))
+    if msg:
+        bot.chat(msg)
+        return jsonify({'status': True, 'message': 'sent'})
+    return jsonify({'status': False, 'message': 'empty message'}), 400
+
+
+@app.route('/api/chat/new', methods=['GET'])
+def api_chat_new():
+    """获取新消息 (Phase 2 Bridge 兼容)"""
+    events = info_bot.get_action_description_new()
+    chat_messages = []
+    for event in events:
+        if isinstance(event, str) and ('chat' in event.lower() or 'msg' in event.lower()):
+            chat_messages.append({'text': event, 'player': 'server'})
+    return jsonify(chat_messages)
+
+# ── 启动 ──
+
+# app.run(port=local_port, debug=False)
 # utility waitress-serve
 from waitress import serve
 serve(app, port=local_port)

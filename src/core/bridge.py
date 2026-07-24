@@ -163,24 +163,24 @@ class MinecraftBridge:
         self._running = True
 
         if self.mode == BridgeMode.REAL:
-            # 延迟导入 httpx (可选依赖)
+            # 延迟导入 httpx (必需依赖)
             try:
                 import httpx
                 self._http_client = httpx.AsyncClient(timeout=10.0)
             except ImportError:
-                logger.error("httpx 未安装。请: pip install httpx")
-                self.mode = BridgeMode.DISABLED
+                raise ImportError(
+                    "REAL 模式需要 httpx。请安装: pip install httpx"
+                )
 
-        if self.mode == BridgeMode.REAL:
-            self._world_task = asyncio.create_task(
-                self._poll_world_state(), name="bridge-world-poll"
-            )
+        if self.mode == BridgeMode.REAL or self.mode == BridgeMode.MOCK:
+            if self.mode == BridgeMode.REAL:
+                self._world_task = asyncio.create_task(
+                    self._poll_world_state(), name="bridge-world-poll"
+                )
             self._chat_task = asyncio.create_task(
                 self._poll_chat(), name="bridge-chat-poll"
             )
-            logger.info(f"MinecraftBridge 已启动 (REAL 模式, {self.base_url})")
-        elif self.mode == BridgeMode.MOCK:
-            logger.info("MinecraftBridge 已启动 (MOCK 模式)")
+            logger.info(f"MinecraftBridge 已启动 ({self.mode.value.upper()} 模式{', ' + self.base_url if self.mode == BridgeMode.REAL else ''})")
         else:
             logger.info("MinecraftBridge 已启动 (DISABLED 模式)")
 
@@ -325,7 +325,7 @@ class MinecraftBridge:
             )
 
         if self.mode == BridgeMode.MOCK:
-            return self._mock_execute(tool_name, args)
+            return await self._mock_execute(tool_name, args)
 
         # REAL 模式 — HTTP 调用 Flask 服务器
         result = await self._fetch("/api/action", method="POST", json_data={
@@ -343,10 +343,10 @@ class MinecraftBridge:
             data=result.get("data", {}),
         )
 
-    def _mock_execute(self, tool_name: str, args: dict) -> BridgeResult:
+    async def _mock_execute(self, tool_name: str, args: dict) -> BridgeResult:
         """模拟工具执行 (测试/开发)"""
-        # 模拟延迟
-        time.sleep(0.1)
+        # 模拟延迟 (异步, 不阻塞事件循环)
+        await asyncio.sleep(0.1)
 
         # 更新 MOCK 世界状态
         if tool_name == "moveTo":

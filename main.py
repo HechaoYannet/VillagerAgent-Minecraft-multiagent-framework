@@ -91,15 +91,19 @@ def setup_logging(config: dict):
 
 
 async def run_agent(config: dict, logger: logging.Logger):
-    """启动 Agent 系统"""
-    logger.info("启动 Agent 系统...")
-    # TODO: Phase 2 - 初始化事件总线、创建 Agent、连接 Minecraft 服务器
-    logger.info("Agent 系统就绪")
-    # 保持运行
+    """启动 Agent 系统 (Phase 2 事件驱动框架)"""
+    from src.core.controller import create_controller_from_config
+
+    bridge_mode = config.get("bridge", {}).get("mode", "disabled")
+    logger.info(f"启动 Agent 系统 (Bridge 模式: {bridge_mode})...")
+
+    controller = await create_controller_from_config(config, bridge_mode=bridge_mode)
     try:
-        while True:
-            await asyncio.sleep(1)
+        await controller.run_forever()
     except asyncio.CancelledError:
+        pass
+    finally:
+        await controller.shutdown()
         logger.info("Agent 系统关闭")
 
 

@@ -123,6 +123,9 @@ class ConversationMemory:
         self._max_history = max_history
         self._agent_name = agent_name
 
+        # 模板变量 (持久化存储, _rebuild_system 每次都从模板渲染)
+        self._tool_descriptions: str = ""
+
         # 固定部分 (不会被截断)
         self._system_message: str = ""  # 完整的系统提示词 (含性格+知识)
         self._rebuild_system()
@@ -149,7 +152,7 @@ class ConversationMemory:
         ).replace(
             "{{minecraft_knowledge}}", MINECRAFT_KNOWLEDGE_CARD_ZH
         ).replace(
-            "{{tool_descriptions}}", ""  # 由 ToolRegistry 动态注入
+            "{{tool_descriptions}}", self._tool_descriptions
         ).replace(
             "{{relevant_data}}", ""
         ).replace(
@@ -180,9 +183,8 @@ class ConversationMemory:
 
     def update_tool_descriptions(self, tool_descriptions: str):
         """动态更新工具描述"""
-        self._system_message = self._system_message.replace(
-            "{{tool_descriptions}}", tool_descriptions
-        )
+        self._tool_descriptions = tool_descriptions
+        self._rebuild_system()
 
     # ── 消息管理 ────────────────────────────────────────────────────
 

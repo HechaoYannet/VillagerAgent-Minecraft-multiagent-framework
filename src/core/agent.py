@@ -138,6 +138,7 @@ class AsyncBaseAgent:
         # 状态
         self.state = AgentState.IDLE
         self._interrupt_flag = asyncio.Event()
+        self._stopped = asyncio.Event()
         self._current_task: Optional[asyncio.Task] = None
         self._last_active_at = time.monotonic()
 
@@ -207,15 +208,20 @@ class AsyncBaseAgent:
         if self.stream_callback:
             await self.stream_callback("state", f"{self.name} 就绪")
 
-        # 保持运行直到 STOPPED
-        while self.state != AgentState.STOPPED:
-            await asyncio.sleep(0.5)
+        # 保持运行直到 STOPPED (事件驱动, 无忙轮询)
+        await self._stopped.wait()
 
     async def stop(self):
         """停止 Agent"""
         self.state = AgentState.STOPPED
         if self._current_task and not self._current_task.done():
             self._current_task.cancel()
+        # 取消所有事件订阅 (防止 restart 时重复注册)
+        self.event_bus.unsubscribe(EventType.USER_INPUT, self._handle_user_input)
+        self.event_bus.unsubscribe(EventType.INTERRUPT, self._handle_interrupt)
+        self.event_bus.unsubscribe(EventType.CHAT, self._handle_chat)
+        self.event_bus.unsubscribe(EventType.TIMER, self._handle_timer)
+        self._stopped.set()
         self._log_state("Agent 已停止")
 
     # ── 事件处理器 ──────────────────────────────────────────────────
@@ -247,6 +253,10 @@ class AsyncBaseAgent:
             return
 
         player = event.data.get("player", "")
+        # 过滤自己的消息 (防止 MOCK 模式下的反馈回路)
+        if player == self.name or player == self.bridge.agent_name:
+            return
+
         message = event.data.get("message", "")
 
         # 检测是否需要响应 (提到 Agent 名字等)
@@ -366,11 +376,15 @@ class AsyncBaseAgent:
 
                 # ── 工具调用 → ACTING ──────────────────
                 if result.has_tool_calls:
-                    # 记录 assistant 消息
+                    # 记录 assistant 消息 (本地列表 + 持久记忆)
                     messages.append(AssistantMessage(
                         content=result.content,
                         tool_calls=result.tool_calls,
                     ))
+                    self.memory.add_assistant_message(
+                        content=result.content,
+                        tool_calls=result.tool_calls,
+                    )
 
                     for tc in result.tool_calls:
                         # 中断检查
@@ -402,14 +416,14 @@ class AsyncBaseAgent:
                                 bridge_result.message[:200]
                             )
 
-                        # 记录工具结果
+                        # 记录工具结果 (本地列表 + 持久记忆)
+                        result_dict = bridge_result.to_dict()
                         messages.append(ToolMessage(
                             tool_call_id=tc.id,
                             name=tc.name,
-                            content=json.dumps(
-                                bridge_result.to_dict(), ensure_ascii=False
-                            ),
+                            content=json.dumps(result_dict, ensure_ascii=False),
                         ))
+                        self.memory.add_tool_result(tc.id, tc.name, result_dict)
 
                     self.stats.tool_calls += len(result.tool_calls)
                     continue  # 回到 THINKING
