@@ -33,8 +33,16 @@ pvp = require("mineflayer-pvp").plugin
 Vec3 = require("vec3")
 minecraftHawkEye = require("minecrafthawkeye").default
 
-mineflayerViewer = require('prismarine-viewer').mineflayer
-Socks = require("socks5-client")
+try:
+    mineflayerViewer = require('prismarine-viewer').mineflayer
+except Exception:
+    mineflayerViewer = None
+    print("prismarine-viewer 不可用 (缺少 canvas 模块), Web 查看器已禁用")
+
+try:
+    Socks = require("socks5-client")
+except Exception:
+    Socks = None
 minecraftData = require('minecraft-data')
 mcData = minecraftData('1.21.1')
 # print(mcData.itemsByName['yellow_carpet'])
