@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} — VillagerAgent</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
+        nav { background: #161b22; border-bottom: 1px solid #30363d; padding: 0 24px; display: flex; align-items: center; height: 56px; gap: 24px; }
+        nav a { color: #8b949e; text-decoration: none; font-size: 14px; padding: 8px 12px; border-radius: 6px; transition: all 0.2s; }
+        nav a:hover, nav a.active { color: #f0f6fc; background: #21262d; }
+        nav .brand { color: #58a6ff; font-size: 18px; font-weight: 700; margin-right: 16px; }
+        main { max-width: 1200px; margin: 0 auto; padding: 24px; }
+        h1 { font-size: 24px; margin-bottom: 16px; color: #f0f6fc; }
+        h2 { font-size: 18px; margin: 24px 0 12px; color: #f0f6fc; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+        .card h3 { font-size: 16px; margin-bottom: 8px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+        .stat { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #21262d; }
+        .stat:last-child { border-bottom: none; }
+        .stat-label { color: #8b949e; }
+        .stat-value { font-weight: 600; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .badge-idle { background: #23863622; color: #3fb950; border: 1px solid #238636; }
+        .badge-busy { background: #d2992222; color: #d29922; border: 1px solid #d29922; }
+        .badge-error { background: #f8514922; color: #f85149; border: 1px solid #f85149; }
+        .badge-stopped { background: #8b949e22; color: #8b949e; border: 1px solid #8b949e; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #21262d; font-size: 14px; }
+        th { color: #8b949e; font-weight: 600; }
+        .agent-link { color: #58a6ff; text-decoration: none; }
+        pre { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 16px; overflow-x: auto; font-size: 13px; line-height: 1.5; }
+        .chat-box { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 16px; height: 400px; overflow-y: auto; margin-bottom: 12px; }
+        .chat-msg { margin-bottom: 12px; padding: 8px 12px; border-radius: 8px; max-width: 80%; }
+        .chat-incoming { background: #21262d; margin-right: auto; }
+        .chat-outgoing { background: #1f6feb22; border: 1px solid #1f6feb; margin-left: auto; text-align: right; }
+        .chat-sender { font-size: 12px; color: #8b949e; margin-bottom: 4px; }
+        .chat-form { display: flex; gap: 8px; }
+        .chat-form input { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 10px 12px; color: #c9d1d9; font-size: 14px; }
+        .chat-form button { background: #238636; color: white; border: none; border-radius: 6px; padding: 10px 20px; cursor: pointer; font-size: 14px; }
+        .btn { display: inline-block; padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; text-decoration: none; }
+        .btn-primary { background: #238636; border-color: #238636; color: white; }
+        .btn-danger { background: #da3633; border-color: #da3633; color: white; }
+    </style>
+</head>
+<body>
+    <nav>
+        <span class="brand">🏰 VillagerAgent</span>
+        <a href="/" {% if title == '控制台' %}class="active"{% endif %}>控制台</a>
+        <a href="/agents" {% if title == 'Agent 管理' %}class="active"{% endif %}>Agent</a>
+        <a href="/chat" {% if title == '对话' %}class="active"{% endif %}>对话</a>
+        <a href="/logs" {% if title == '日志' %}class="active"{% endif %}>日志</a>
+    </nav>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

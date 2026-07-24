@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>日志查看器</h1>
+
+<div style="display:flex;gap:16px;">
+    <div class="card" style="flex:1;">
+        <h3>LLM 请求日志</h3>
+        <pre id="llm-logs" style="max-height:400px;overflow-y:auto;">加载中...</pre>
+        <button class="btn" onclick="loadLLMLogs()" style="margin-top:8px;">刷新</button>
+    </div>
+    <div class="card" style="flex:1;">
+        <h3>Agent 动作日志</h3>
+        <pre id="action-logs" style="max-height:400px;overflow-y:auto;">加载中...</pre>
+        <button class="btn" onclick="loadActionLogs()" style="margin-top:8px;">刷新</button>
+    </div>
+</div>
+
+<script>
+async function loadLLMLogs() {
+    try {
+        const resp = await fetch('/api/logs/llm?limit=30');
+        const data = await resp.json();
+        const el = document.getElementById('llm-logs');
+        if (Array.isArray(data) && data.length > 0) {
+            el.textContent = data.map(r =>
+                `${r.timestamp?.slice(11,19) || ''} ${r.model || ''} ${r.total_tokens || 0}t OK`
+            ).join('\n');
+        } else {
+            el.textContent = '暂无日志';
+        }
+    } catch(e) {
+        document.getElementById('llm-logs').textContent = '加载失败: ' + e.message;
+    }
+}
+
+async function loadActionLogs() {
+    try {
+        const resp = await fetch('/api/logs/actions?limit=30');
+        const data = await resp.json();
+        const el = document.getElementById('action-logs');
+        if (Array.isArray(data) && data.length > 0) {
+            el.textContent = data.map(r =>
+                `${r.timestamp?.slice(11,19) || ''} ${r.tool || ''} ${r.success ? '✓' : '✗'}`
+            ).join('\n');
+        } else {
+            el.textContent = '暂无日志';
+        }
+    } catch(e) {
+        document.getElementById('action-logs').textContent = '加载失败: ' + e.message;
+    }
+}
+
+loadLLMLogs();
+loadActionLogs();
+</script>
+{% endblock %}

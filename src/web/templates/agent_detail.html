@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ agent_name }}</h1>
+
+{% if agent %}
+<div class="grid">
+    <div class="card">
+        <h3>状态</h3>
+        <div class="stat"><span class="stat-label">当前状态</span>
+            <span class="stat-value">
+                {% if agent.state == 'IDLE' %}<span class="badge badge-idle">空闲</span>
+                {% elif agent.state in ('LISTENING','THINKING','ACTING') %}<span class="badge badge-busy">{{ agent.state }}</span>
+                {% else %}<span class="badge">{{ agent.state }}</span>
+                {% endif %}
+            </span>
+        </div>
+        <div class="stat"><span class="stat-label">是否繁忙</span><span class="stat-value">{{ '是' if agent.is_processing else '否' }}</span></div>
+    </div>
+
+    {% if agent.stats %}
+    <div class="card">
+        <h3>统计</h3>
+        <div class="stat"><span class="stat-label">已启动任务</span><span class="stat-value">{{ agent.stats.tasks_started }}</span></div>
+        <div class="stat"><span class="stat-label">已完成</span><span class="stat-value">{{ agent.stats.tasks_completed }}</span></div>
+        <div class="stat"><span class="stat-label">已失败</span><span class="stat-value">{{ agent.stats.tasks_failed }}</span></div>
+        <div class="stat"><span class="stat-label">LLM 调用</span><span class="stat-value">{{ agent.stats.llm_calls }}</span></div>
+        <div class="stat"><span class="stat-label">工具调用</span><span class="stat-value">{{ agent.stats.tool_calls }}</span></div>
+        <div class="stat"><span class="stat-label">总 Token</span><span class="stat-value">{{ agent.stats.total_tokens }}</span></div>
+    </div>
+    {% endif %}
+
+    {% if agent.memory %}
+    <div class="card" style="grid-column: 1 / -1;">
+        <h3>对话记忆</h3>
+        <div class="stat"><span class="stat-label">消息数</span><span class="stat-value">{{ agent.memory.message_count }}</span></div>
+        {% if agent.memory.world_state %}
+        <pre>{{ agent.memory.world_state }}</pre>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% else %}
+<p style="color:#8b949e;">Agent 未启动或不存在。</p>
+{% endif %}
+{% endblock %}

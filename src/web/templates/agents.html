@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Agent 管理</h1>
+
+<table>
+    <thead>
+        <tr><th>名称</th><th>状态</th><th>任务完成</th><th>Token</th><th>最后活跃</th><th>操作</th></tr>
+    </thead>
+    <tbody>
+        {% for agent in agents %}
+        <tr>
+            <td><a href="/agents/{{ agent.name }}" class="agent-link">{{ agent.name }}</a></td>
+            <td>
+                {% if agent.state == 'IDLE' %}<span class="badge badge-idle">空闲</span>
+                {% elif agent.state in ('LISTENING','THINKING','ACTING') %}<span class="badge badge-busy">{{ agent.state }}</span>
+                {% else %}<span class="badge">{{ agent.state }}</span>
+                {% endif %}
+            </td>
+            <td>{{ agent.stats.tasks_completed if agent.stats else 0 }}</td>
+            <td>{{ agent.stats.total_tokens if agent.stats else 0 }}</td>
+            <td>{{ "%.0f"|format(agent.last_active_at) if agent.last_active_at else 'N/A' }}s ago</td>
+            <td><a href="/agents/{{ agent.name }}" class="btn">详情</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if not agents %}
+<p style="color:#8b949e;margin-top:24px;">暂无 Agent。请先通过配置启动 Agent。</p>
+{% endif %}
+{% endblock %}

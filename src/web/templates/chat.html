@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>对话</h1>
+
+<div style="display:flex;gap:16px;">
+    <div style="flex:1;">
+        <div class="card" style="margin-bottom:8px;">
+            <label style="font-size:14px;color:#8b949e;">发送给:</label>
+            <select id="agent-select" style="margin-left:8px;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:4px 8px;">
+                {% for a in agents %}
+                <option value="{{ a }}">{{ a }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="chat-box" id="chat-box">
+            <div style="color:#8b949e;text-align:center;padding-top:160px;">输入消息开始对话</div>
+        </div>
+        <div class="chat-form">
+            <input type="text" id="chat-input" placeholder="输入消息..." onkeypress="if(event.key==='Enter')sendMessage()">
+            <button onclick="sendMessage()">发送</button>
+        </div>
+    </div>
+</div>
+
+<script>
+function sendMessage() {
+    const input = document.getElementById('chat-input');
+    const msg = input.value.trim();
+    if (!msg) return;
+
+    const agent = document.getElementById('agent-select').value;
+    const box = document.getElementById('chat-box');
+
+    box.innerHTML += `<div class="chat-msg chat-outgoing"><div class="chat-sender">你 → ${agent}</div>${msg}</div>`;
+    input.value = '';
+    box.scrollTop = box.scrollHeight;
+
+    fetch(`/api/agents/${agent}/command`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: msg})
+    });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>控制台</h1>
+
+<div class="grid">
+    <div class="card">
+        <h3>系统状态</h3>
+        <div class="stat"><span class="stat-label">运行时间</span><span class="stat-value">{{ uptime }}</span></div>
+        <div class="stat"><span class="stat-label">Agent 数量</span><span class="stat-value">{{ agent_count }}</span></div>
+    </div>
+    {% for agent in agents %}
+    <div class="card">
+        <h3><a href="/agents/{{ agent.name }}" class="agent-link">{{ agent.name }}</a></h3>
+        <div class="stat"><span class="stat-label">状态</span>
+            <span class="stat-value">
+                {% if agent.state == 'IDLE' %}<span class="badge badge-idle">空闲</span>
+                {% elif agent.state in ('LISTENING','THINKING','ACTING') %}<span class="badge badge-busy">{{ agent.state }}</span>
+                {% elif agent.state == 'STOPPED' %}<span class="badge badge-stopped">已停止</span>
+                {% else %}<span class="badge">{{ agent.state }}</span>
+                {% endif %}
+            </span>
+        </div>
+        {% if agent.stats %}
+        <div class="stat"><span class="stat-label">完成任务</span><span class="stat-value">{{ agent.stats.tasks_completed }}</span></div>
+        <div class="stat"><span class="stat-label">Token 用量</span><span class="stat-value">{{ agent.stats.total_tokens }}</span></div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

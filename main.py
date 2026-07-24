@@ -113,10 +113,13 @@ async def run_web(config: dict, logger: logging.Logger):
         logger.info("Web 管理后台已禁用")
         return
 
-    logger.info("启动 Web 管理后台...")
-    # TODO: Phase 7 - 导入并启动 FastAPI 应用
-    logger.info(f"Web 管理后台启动在 http://{config['web']['host']}:{config['web']['port']}")
-    # 保持运行
+    from src.web.app import start_server_async, set_controller
+
+    host = config.get("web", {}).get("host", "0.0.0.0")
+    port = config.get("web", {}).get("port", 8080)
+
+    logger.info(f"Web 管理后台启动在 http://{host}:{port}")
+    await start_server_async(host=host, port=port, controller=None)  # controller 由 run_agent 注入
     try:
         while True:
             await asyncio.sleep(1)
