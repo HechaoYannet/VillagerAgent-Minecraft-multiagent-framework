@@ -73,3 +73,16 @@ from src.core.planning import (  # noqa: F401
     TaskPlan,
     EnvAnalysis,
 )
+
+# Phase 5: 交互管理
+from src.core.interaction import (  # noqa: F401
+    InteractionManager,
+    InteractionConfig,
+)
+
+# Phase 6: 工具优化
+from src.core.tool_optimizer import (  # noqa: F401
+    ToolOptimizer,
+    BEST_TOOL_FOR_BLOCK,
+    CRAFTING_CHAINS,
+)
