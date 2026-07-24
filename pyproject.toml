@@ -1,0 +1,166 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VillagerAgent — Minecraft AI 伙伴系统
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 快速开始:
+#   ./scripts/setup.sh       (Linux / macOS / WSL)
+#   .\scripts\setup.ps1      (Windows PowerShell)
+#
+# 依赖验证: grep "^import \|^from " over src/ model/ env/ pipeline/
+# 最后验证: 2026-07-24
+
+[project]
+name = "villager-agent"
+version = "2.0.0"
+description = "Minecraft AI Companion System — Multi-Agent Framework"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+    { name = "VillagerAgent Team" },
+]
+keywords = ["minecraft", "ai-agent", "multi-agent", "llm", "mineflayer"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: JavaScript",
+    "Topic :: Games/Entertainment",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# ── 核心运行时依赖 (代码验证版) ──
+# 依赖来源:
+#   main.py          → openai, fastapi, uvicorn, jinja2, pyyaml, colorlog
+#   src/web/app.py   → fastapi, jinja2
+#   src/llm/*.py     → openai, tiktoken
+#   src/core/*.py    → httpx (via openai)
+#   env/minecraft_server.py → flask, waitress, names, javascript, Levenshtein
+dependencies = [
+    # LLM 客户端
+    "openai>=1.30.0",
+    # Web 框架
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "jinja2>=3.1.0",
+    "python-multipart>=0.0.9",
+    "flask>=3.0.0",
+    "waitress>=3.0.0",
+    # WebSocket
+    "websockets>=12.0",
+    # 配置 & 数据验证
+    "pydantic>=2.5.0",
+    "pyyaml>=6.0",
+    # 日志
+    "colorlog>=6.8.0",
+    # Token 计数
+    "tiktoken>=0.5.0",
+    # Minecraft 桥接 (JSPyBridge)
+    "javascript>=1.0.0",
+    "names>=0.3.0",
+    # 字符串匹配
+    "python-Levenshtein>=0.25.0",
+]
+
+# ── 可选依赖组 ──
+[project.optional-dependencies]
+# Google Gemini 模型
+gemini = ["google-generativeai>=0.3.0"]
+# 长期记忆 (向量数据库)
+memory = ["chromadb>=0.4.0"]
+# 开发 & 测试
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "black>=24.0.0",
+    "ruff>=0.3.0",
+    "mypy>=1.8.0",
+]
+# 全部 (开发 + Gemini + 记忆)
+full = [
+    "google-generativeai>=0.3.0",
+    "chromadb>=0.4.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "black>=24.0.0",
+    "ruff>=0.3.0",
+    "mypy>=1.8.0",
+]
+
+# ── 控制台入口点 ──
+[project.scripts]
+villager-agent = "main:main"
+
+# ── 项目 URL ──
+[project.urls]
+Repository = "https://github.com/VillagerAgent/VillagerAgent-Minecraft-multiagent-framework"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# setuptools 配置 — 包发现
+# ═══════════════════════════════════════════════════════════════════════════════
+[tool.setuptools]
+py-modules = ["main", "speaking_style", "tiny_start", "js_setup"]
+
+[tool.setuptools.packages.find]
+include = [
+    "src", "src.*",
+    "env", "env.*",
+    "model", "model.*",
+    "pipeline", "pipeline.*",
+]
+exclude = [
+    "tests", "tests.*",
+    "docker",
+    "js_bridge",
+    "js_bridge.*",
+]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 工具配置
+# ═══════════════════════════════════════════════════════════════════════════════
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+exclude = '''
+/(
+    \.venv
+  | node_modules
+  | js_bridge
+  | \.git
+  | __pycache__
+  | \.cache
+)/
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+    ".venv",
+    "node_modules",
+    "js_bridge",
+    ".git",
+    "__pycache__",
+    ".cache",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+exclude = ["js_bridge/", "node_modules/", ".venv/"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

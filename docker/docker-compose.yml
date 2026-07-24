@@ -1,43 +1,72 @@
+# =============================================
+# VillagerAgent Docker Compose 配置
+# =============================================
+# 用法:
+#   1. 复制 config/secrets.template.yaml 为 config/secrets.yaml 并填入真实值
+#   2. 设置环境变量 (或创建 .env 文件):
+#        MINECRAFT_HOST=你的MC服务器IP
+#        LLM_API_KEY=sk-your-api-key
+#   3. docker compose -f docker/docker-compose.yml up
+#
+# 仅运行 Agent (无 ChromaDB):
+#   docker compose -f docker/docker-compose.yml up villager-core
+# =============================================
+
 version: '3.8'
 
 services:
-  # 主服务：VillagerAgent 核心
+  # ── 主服务: VillagerAgent 核心 ──
   villager-core:
     build:
       context: ..
-      dockerfile: docker/Dockerfile
+      dockerfile: Dockerfile
     container_name: villager-agent
     restart: unless-stopped
-    secrets:
-      - api_keys
     volumes:
       # 持久化数据
       - ../data/world:/app/data/world
       - ../logs:/app/logs
+      # 配置文件 (只读)
       - ../config:/app/config:ro
     environment:
+      # Minecraft 连接
       - MINECRAFT_HOST=${MINECRAFT_HOST:-localhost}
       - MINECRAFT_PORT=${MINECRAFT_PORT:-25565}
-      - VILLAGER_ENV=production
+      # Bridge 配置
+      - BRIDGE_MODE=${BRIDGE_MODE:-real}
+      - BRIDGE_PORT=${BRIDGE_PORT:-5000}
+      - AGENT_USERNAME=${AGENT_USERNAME:-VillagerAgent}
+      # Web 管理后台
+      - WEB_PORT=${WEB_PORT:-8080}
+      # LLM API (推荐通过环境变量传入, 避免写死在 secrets.yaml)
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      # 运行时模式
+      - VILLAGER_ENV=${VILLAGER_ENV:-production}
     ports:
       - "${WEB_PORT:-8080}:8080"
+      # Bridge 端口仅内部使用, 如需外部访问请取消注释:
+      # - "${BRIDGE_PORT:-5000}:5000"
     networks:
       - villager-net
-    depends_on:
-      chromadb:
-        condition: service_healthy
+    # ChromaDB 是可选的 (用于长期记忆), 如不需要可删除 depends_on
+    # depends_on:
+    #   chromadb:
+    #     condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 90s
 
-  # 向量数据库：ChromaDB (长期记忆)
+  # ── 向量数据库: ChromaDB (可选, 长期记忆) ──
+  # 如不需要, 注释掉此服务并在 config/default.yaml 设置 memory.long_term_enabled: false
   chromadb:
     image: chromadb/chroma:latest
     container_name: villager-chromadb
     restart: unless-stopped
+    profiles:
+      - full
     volumes:
       - chroma_data:/chroma/chroma
     environment:
@@ -61,7 +90,3 @@ volumes:
 networks:
   villager-net:
     driver: bridge
-
-secrets:
-  api_keys:
-    file: ../config/secrets.yaml

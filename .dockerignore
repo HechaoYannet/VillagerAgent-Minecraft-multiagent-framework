@@ -1,0 +1,104 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environment
+venv/
+.venv/
+.env
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sensitive files
+API_KEY_LIST
+config/secrets.yaml
+*.pem
+*.key
+openai_api_key.txt
+google_api_key.txt
+zhipu_api_key.txt
+
+# Runtime logs
+logs/
+*.jsonl
+
+# Data (persisted via volumes)
+data/memory/
+data/score.json
+data/action_log.json
+data/tokens.json
+data/llm_inference.json
+data/history.json
+data/env.json
+data/agent.json
+data/experience.json
+data/url_prefix.json
+data/blueprint_description.json
+data/recipe_hint.json
+data/map_description.json
+data/map.json
+data/openai.logs
+data/google.logs
+data/zhipu.logs
+data/vllm.logs
+
+# Node.js
+node_modules/
+package-lock.json
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db
+*/.DS_Store
+
+# Model checkpoints
+*.pth
+*.bin
+*.safetensors
+rl_env/
+
+# ChromaDB local data
+chroma_data/
+
+# Test coverage
+.coverage
+htmlcov/
+
+# Claude
+.claude/
+
+# Misc
+tmp/
+auto_task/
+*.zip
+ui/logs/
+img/*graph.png
+img/*graph.md
+dm_info_compression/
+env_gen/
+100_meta.json
+filtered_tasks.json
+*config*.json
+
+# Cache
+.cache/

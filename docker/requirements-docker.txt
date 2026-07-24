@@ -1,18 +1,10 @@
 # ===========================================
-# VillagerAgent 运行时依赖 (代码验证版)
+# VillagerAgent Docker 运行时依赖 (代码验证版)
 # ===========================================
 # 验证方法: grep "^import \|^from " over src/ model/ env/ pipeline/
 # 最后验证: 2026-07-24
 #
-# 与旧版的区别:
-#   + flask, waitress, names  — env/minecraft_server.py 桥接必需
-#   - retry>=0.9.2            — 整个代码库零引用, 已移除
-#   - aiohttp>=3.9.0          — 整个代码库零引用, 已移除
-#
-# 可选依赖 (按需安装):
-#   google-generativeai  — 仅 Gemini 用户需要
-#   chromadb             — 仅启用长期记忆时需要
-#   torch                — 仅 pipeline/legacy 模式需要
+# 与根 requirements.txt 一致, 用于 Docker 构建层缓存优化。
 
 # ── LLM 客户端 ──
 openai>=1.30.0
@@ -43,5 +35,5 @@ tiktoken>=0.5.0
 javascript>=1.0.0
 names>=0.3.0
 
-# ── 字符串匹配 (env_api.py:2489) ──
+# ── 字符串匹配 ──
 Levenshtein>=0.25.0
