@@ -130,6 +130,9 @@ class AsyncBaseAgent:
         world_config = None,      # WorldConfig
         long_term_memory = None,  # LongTermMemory
         planner = None,           # TaskPlanner
+        # Phase 5: 情绪与交互
+        emotion_engine = None,    # EmotionEngine
+        interaction_manager = None,  # InteractionManager
     ):
         self.name = name
         self.event_bus = event_bus
@@ -143,6 +146,10 @@ class AsyncBaseAgent:
         self.world_config = world_config
         self.long_term_memory = long_term_memory
         self.planner = planner
+
+        # Phase 5: 情绪与交互
+        self.emotion_engine = emotion_engine
+        self.interaction = interaction_manager
 
         # 状态
         self.state = AgentState.IDLE
@@ -303,9 +310,32 @@ class AsyncBaseAgent:
             logger.debug(f"世界状态更新失败: {e}")
             return
 
+        # Phase 5: 情绪自然衰减
+        if self.emotion_engine:
+            self.emotion_engine.update()
+            # 低生命值 → 担忧
+            ws = self.memory.world_state
+            if ws and ws.health < 10:
+                self.emotion_engine.on_danger_detected(severity=0.6)
+
         # 仅在 IDLE 状态检测主动行为
         if not self.is_idle:
             return
+
+        # Phase 5: 主动对话检查 (长时间空闲)
+        if self.interaction and self.interaction.config.proactive_chat:
+            idle_sec = time.monotonic() - self._last_active_at
+            if self.emotion_engine:
+                self.emotion_engine.on_long_idle()
+            ws = self.memory.world_state
+            nearby = len(ws.nearby_entities) if ws else 0
+            msg = self.interaction.check_proactive(
+                idle_seconds=idle_sec,
+                world_time=ws.time_of_day if ws else "day",
+                nearby_players=nearby,
+            )
+            if msg:
+                await self.bridge.send_chat(msg)
 
         # 主动行为检测
         action = self._detect_proactive_action()
@@ -355,13 +385,23 @@ class AsyncBaseAgent:
             user_message + ("\n\n" + task_plan.to_text() if task_plan else "")
         )
 
-        # 注入世界知识到系统提示词
-        if world_context:
-            # 在第一条系统消息后插入世界上下文
+        # 注入世界知识 + 情绪状态到系统提示词
+        extra_context = world_context
+        if self.emotion_engine:
+            emotion_fragment = self.emotion_engine.to_prompt_fragment()
+            extra_context = emotion_fragment + "\n\n" + extra_context
+        if self.interaction:
+            mode = self.interaction.choose_response_mode(
+                is_command=user_message.strip().startswith(("/", "@", "!")),
+                emotion_level=self.emotion_engine.mood_intensity if self.emotion_engine else 0.0,
+            )
+            extra_context += f"\n回复风格: {self.interaction.get_response_instruction(mode)}"
+
+        if extra_context:
             sys_msg = messages[0]
             if isinstance(sys_msg, SystemMessage):
                 messages[0] = SystemMessage(
-                    content=sys_msg.content + "\n\n" + world_context
+                    content=sys_msg.content + "\n\n" + extra_context
                 )
 
         self.stats.tasks_started += 1
@@ -409,6 +449,15 @@ class AsyncBaseAgent:
                     # REFLECTING
                     self.state = AgentState.REFLECTING
                     await self._reflect_and_respond(event, reply, tool_steps)
+
+                    # Phase 5: 情绪触发
+                    if self.emotion_engine:
+                        self.emotion_engine.on_task_success(difficulty=len(tool_steps) / 10)
+
+                    # Phase 5: 交互格式化
+                    if self.interaction:
+                        self.interaction.record_task(user_message, True, len(tool_steps))
+                        reply = self.interaction.format_response(reply, recipient=player)
 
                     # Phase 4: 记录任务完成事件
                     if self.long_term_memory:
@@ -502,6 +551,9 @@ class AsyncBaseAgent:
             raise
         except Exception as e:
             logger.exception(f"Agent {self.name} 处理异常: {e}")
+            # Phase 5: 情绪触发
+            if self.emotion_engine:
+                self.emotion_engine.on_task_failure()
             await self._respond(event, f"处理出错: {e}", success=False)
             self.state = AgentState.IDLE
             self.stats.tasks_failed += 1

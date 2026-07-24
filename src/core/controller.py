@@ -57,6 +57,9 @@ class AgentConfig:
     world_name: str = "default"
     memory_dir: str = "data/memory"
     planning_enabled: bool = True
+    # Phase 5
+    emotion_enabled: bool = True
+    proactive_chat: bool = True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -251,6 +254,27 @@ class AgentController:
             world_config=world_config,
             long_term_memory=long_term_memory,
         )
+
+        # Phase 5: 情绪引擎
+        if cfg.emotion_enabled:
+            from src.prompts.emotions import EmotionEngine
+            emotion_engine = EmotionEngine(
+                personality_type=cfg.personality.get("性格", cfg.personality.get("personality", "热情"))
+            )
+            agent.emotion_engine = emotion_engine
+
+        # Phase 5: 交互管理器
+        from src.core.interaction import InteractionManager, InteractionConfig
+        interaction = InteractionManager(
+            agent_name=name,
+            emotion_engine=getattr(agent, 'emotion_engine', None),
+            config=InteractionConfig(
+                agent_name=name,
+                use_emojis=True,
+                proactive_chat=cfg.proactive_chat,
+            ),
+        )
+        agent.interaction = interaction
 
         # Phase 4: 创建规划器 (需要 agent.memory)
         if cfg.planning_enabled:

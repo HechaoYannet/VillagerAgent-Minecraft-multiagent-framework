@@ -1,6 +1,14 @@
 """
-提示词模块 — Phase 3+ 中文提示词系统
+提示词模块 — Phase 3-5 中文提示词 + 人格 + 情绪系统
 """
+
+from src.prompts.emotions import (  # noqa: F401
+    EmotionEngine,
+    Emotion,
+    EmotionState,
+    EMOTION_EMOJI,
+    EMOTION_TONE,
+)
 
 from src.prompts.system_prompts import (  # noqa: F401
     AGENT_SYSTEM_PROMPT,
