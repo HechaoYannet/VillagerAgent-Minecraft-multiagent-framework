@@ -123,13 +123,12 @@ class TokenUsage:
         """从 OpenAI API usage 对象构造"""
         if usage is None:
             return cls()
+        details = getattr(usage, "completion_tokens_details", None)
         return cls(
             prompt_tokens=getattr(usage, "prompt_tokens", 0),
             completion_tokens=getattr(usage, "completion_tokens", 0),
             total_tokens=getattr(usage, "total_tokens", 0),
-            reasoning_tokens=getattr(usage, "completion_tokens_details", {}).get(
-                "reasoning_tokens", 0
-            ) if hasattr(usage, "completion_tokens_details") else 0,
+            reasoning_tokens=getattr(details, "reasoning_tokens", 0) if details else 0,
         )
 
 
@@ -384,7 +383,24 @@ class ModelCapabilities:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 MODEL_CAPABILITIES_PRESETS: dict[str, ModelCapabilities] = {
-    # DeepSeek
+    # DeepSeek V4 (2026-04 发布，2026-07-24 起 chat/reasoner 弃用)
+    "deepseek-v4-flash": ModelCapabilities(
+        supports_tool_calling=True,
+        supports_reasoning=True,       # 支持 thinking 模式
+        supports_streaming=True,
+        max_context_tokens=1_000_000,  # 1M
+        max_output_tokens=384_000,
+        reasoning_in_stream_only=False,
+    ),
+    "deepseek-v4-pro": ModelCapabilities(
+        supports_tool_calling=True,
+        supports_reasoning=True,
+        supports_streaming=True,
+        max_context_tokens=1_000_000,
+        max_output_tokens=384_000,
+        reasoning_in_stream_only=False,
+    ),
+    # 旧版别名 (已弃用 2026-07-24，保留用于向后兼容)
     "deepseek-chat": ModelCapabilities(
         supports_tool_calling=True,
         supports_reasoning=False,
@@ -397,13 +413,13 @@ MODEL_CAPABILITIES_PRESETS: dict[str, ModelCapabilities] = {
         max_context_tokens=128_000,
         max_output_tokens=8_192,
     ),
-    "deepseek-v4": ModelCapabilities(
+    "deepseek-v4": ModelCapabilities(  # 泛用别名 → flash
         supports_tool_calling=True,
         supports_reasoning=True,
         supports_streaming=True,
-        max_context_tokens=128_000,
-        max_output_tokens=32_000,
-        reasoning_in_stream_only=True,
+        max_context_tokens=1_000_000,
+        max_output_tokens=384_000,
+        reasoning_in_stream_only=False,
     ),
     # OpenAI
     "gpt-4o": ModelCapabilities(
@@ -478,11 +494,17 @@ def detect_capabilities(model_name: str) -> ModelCapabilities:
 
     # 模糊匹配
     if "deepseek" in name_lower:
+        # V4 系列 (2026-04+)
+        if "v4" in name_lower:
+            if "pro" in name_lower:
+                return MODEL_CAPABILITIES_PRESETS["deepseek-v4-pro"]
+            return MODEL_CAPABILITIES_PRESETS["deepseek-v4-flash"]
+        # 旧版推理模型
         if "reasoner" in name_lower or "r1" in name_lower:
             return MODEL_CAPABILITIES_PRESETS["deepseek-reasoner"]
         return ModelCapabilities(
             supports_tool_calling=True,
-            supports_reasoning="v4" in name_lower or "v3" in name_lower,
+            supports_reasoning=False,
             max_context_tokens=128_000,
             max_output_tokens=32_000,
             reasoning_in_stream_only=True,

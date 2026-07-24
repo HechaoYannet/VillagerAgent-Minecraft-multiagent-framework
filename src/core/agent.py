@@ -172,6 +172,7 @@ class AsyncBaseAgent:
 
         # 日志
         self.log_dir = log_dir
+        self.structured_log: Any = None  # Phase 7: injected by controller
 
         # 统计
         self.stats = AgentStats()
@@ -244,6 +245,11 @@ class AsyncBaseAgent:
 
     async def _handle_user_input(self, event: Event):
         """处理用户指令 — 进入 LISTENING 状态"""
+        # LLM 禁用时直接忽略所有用户指令 (不调用 LLM)
+        if not self.bridge.llm_enabled:
+            logger.info(f"[{self.name}] LLM 已禁用，忽略用户指令")
+            return
+
         if self.is_processing:
             # 已在处理中 → 先中断当前任务
             await self._interrupt_current_task("新指令到达")
@@ -301,7 +307,7 @@ class AsyncBaseAgent:
 
     async def _handle_timer(self, event: Event):
         """处理定时器 — 环境扫描 + 主动行为检测"""
-        # 更新世界状态
+        # 更新世界状态 (即使在 LLM 禁用时也更新)
         try:
             world = await self.bridge.get_world_state()
             if world:
@@ -320,6 +326,10 @@ class AsyncBaseAgent:
 
         # 仅在 IDLE 状态检测主动行为
         if not self.is_idle:
+            return
+
+        # LLM 禁用时跳过所有主动行为 (会触发 LLM 调用)
+        if not self.bridge.llm_enabled:
             return
 
         # Phase 5: 主动对话检查 (长时间空闲)
@@ -362,9 +372,18 @@ class AsyncBaseAgent:
         user_message = event.data.get("message", "")
         player = event.data.get("player", "")
 
+        # ── Trace: 任务开始 ──
+        _task_start_time = time.monotonic()
+        _step_start_time = _task_start_time
+        _task_llm_calls_before = self.stats.llm_calls
+        _task_tool_calls_before = self.stats.tool_calls
+        logger.info(f"[{self.name}] 📩 收到: [{player or '玩家'}] {user_message[:100]}")
+
         # Phase 4: 预规划 (LLM 推理任务步骤)
+        # 闲聊/短消息跳过规划，节省 LLM 调用
+        _is_chat = self._is_casual_chat(user_message)
         task_plan = None
-        if self.planner and self.planner.planning_enabled:
+        if not _is_chat and self.planner and self.planner.planning_enabled:
             try:
                 task_plan = await self.planner.plan(user_message)
                 if task_plan and task_plan.steps:
@@ -428,6 +447,42 @@ class AsyncBaseAgent:
                 self.stats.total_prompt_tokens += result.usage.prompt_tokens
                 self.stats.total_completion_tokens += result.usage.completion_tokens
 
+                # Phase 7: 结构化日志
+                if self.structured_log:
+                    await self.structured_log.llm_request(
+                        model=getattr(self.llm, '_model', 'unknown'),
+                        prompt_tokens=result.usage.prompt_tokens,
+                        completion_tokens=result.usage.completion_tokens,
+                        has_tool_calls=result.has_tool_calls,
+                        has_reasoning=bool(getattr(result, 'reasoning', None)),
+                    )
+
+                # ── Trace: LLM 响应 ──
+                _llm_duration = time.monotonic() - _step_start_time
+                _step_start_time = time.monotonic()  # reset for tool execution
+
+                # reasoning
+                if result.reasoning:
+                    _reasoning_preview = str(result.reasoning)[:150].replace('\n', ' ')
+                    logger.info(f"[{self.name}] 💭 推理: {_reasoning_preview}")
+                    if self.structured_log:
+                        await self.structured_log.agent_thought(str(result.reasoning), step + 1)
+
+                # tool calls planned
+                if result.has_tool_calls:
+                    _tool_names = [tc.name for tc in (result.tool_calls or [])]
+                    logger.info(
+                        f"[{self.name}] 🧠 step {step + 1}/{self.max_tool_steps} "
+                        f"(in:{result.usage.prompt_tokens} out:{result.usage.completion_tokens} "
+                        f"⏱{_llm_duration:.1f}s) → 工具: {', '.join(_tool_names)}"
+                    )
+                else:
+                    logger.info(
+                        f"[{self.name}] 🧠 step {step + 1}/{self.max_tool_steps} "
+                        f"(in:{result.usage.prompt_tokens} out:{result.usage.completion_tokens} "
+                        f"⏱{_llm_duration:.1f}s)"
+                    )
+
                 # 流式回调: 思考过程
                 if self.stream_callback and result.reasoning:
                     await self.stream_callback("reasoning", result.reasoning)
@@ -435,6 +490,10 @@ class AsyncBaseAgent:
                 # ── 文本回复 → REFLECTING → IDLE ──────
                 if result.has_content and not result.has_tool_calls:
                     reply = result.content or ""
+
+                    # ── Trace: 回复 ──
+                    _reply_preview = reply[:200].replace('\n', ' ')
+                    logger.info(f"[{self.name}] 💬 回复: {_reply_preview}")
 
                     # 流式回调: 回复内容
                     if self.stream_callback:
@@ -445,6 +504,14 @@ class AsyncBaseAgent:
                         content=reply,
                         reasoning=result.reasoning,
                     )
+
+                    # Phase 7: 聊天日志
+                    if self.structured_log:
+                        await self.structured_log.agent_chat(
+                            player=player or "玩家",
+                            message=reply,
+                            direction="outgoing",
+                        )
 
                     # REFLECTING
                     self.state = AgentState.REFLECTING
@@ -469,7 +536,16 @@ class AsyncBaseAgent:
 
                     self.state = AgentState.IDLE
                     self.stats.tasks_completed += 1
-                    self._log_state(f"任务完成 ({step + 1} 步)")
+                    # ── Trace: 任务完成 ──
+                    _total_time = time.monotonic() - _task_start_time
+                    _llm_count = self.stats.llm_calls - _task_llm_calls_before
+                    _tool_count = self.stats.tool_calls - _task_tool_calls_before
+                    logger.info(
+                        f"[{self.name}] ✅ 完成 ({step + 1}步, "
+                        f"LLM×{_llm_count} 工具×{_tool_count}, "
+                        f"in:{self.stats.total_prompt_tokens} out:{self.stats.total_completion_tokens}, "
+                        f"⏱{_total_time:.1f}s)"
+                    )
                     return
 
                 # ── 工具调用 → ACTING ──────────────────
@@ -499,13 +575,62 @@ class AsyncBaseAgent:
                                 f"{tc.name}({json.dumps(tc.arguments, ensure_ascii=False)})"
                             )
 
-                        # 执行工具
-                        bridge_result = await self.bridge.execute(tc.name, tc.arguments)
+                        # ── Trace: 工具调用 ──
+                        _args_preview = json.dumps(tc.arguments, ensure_ascii=False)[:100]
+                        logger.info(f"[{self.name}] 🔧 {tc.name}({_args_preview})")
+
+                        # 执行工具 (try/except 确保 ToolMessage 始终被添加)
+                        _tool_start = time.monotonic()
+                        try:
+                            bridge_result = await self.bridge.execute(tc.name, tc.arguments)
+                        except Exception as _tool_err:
+                            _tool_duration = time.monotonic() - _tool_start
+                            logger.warning(f"[{self.name}] ✗ 工具异常: {tc.name} → {_tool_err}")
+                            # 构造错误结果 → API 消息序列不会残缺
+                            error_dict = {
+                                "status": False,
+                                "message": f"Tool execution error: {_tool_err}",
+                                "error": str(_tool_err),
+                            }
+                            tool_steps.append({
+                                "tool": tc.name,
+                                "args": tc.arguments,
+                                "result": error_dict,
+                            })
+                            messages.append(ToolMessage(
+                                tool_call_id=tc.id,
+                                name=tc.name,
+                                content=json.dumps(error_dict, ensure_ascii=False),
+                            ))
+                            self.memory.add_tool_result(tc.id, tc.name, error_dict)
+                            continue
+
+                        _tool_duration = time.monotonic() - _tool_start
+
                         tool_steps.append({
                             "tool": tc.name,
                             "args": tc.arguments,
                             "result": bridge_result.to_dict(),
                         })
+
+                        # ── Trace: 工具结果 ──
+                        _status_icon = "✓" if bridge_result.status else "✗"
+                        _result_raw = str(bridge_result.message) if not isinstance(bridge_result.message, str) else bridge_result.message
+                        _result_preview = _result_raw[:150].replace('\n', ' ')
+                        logger.info(
+                            f"[{self.name}] {_status_icon} 结果: {_result_preview} "
+                            f"({_tool_duration:.1f}s)"
+                        )
+
+                        # 结构化日志: agent_action
+                        if self.structured_log:
+                            await self.structured_log.agent_action(
+                                tool_name=tc.name,
+                                args=tc.arguments,
+                                result=bridge_result.to_dict(),
+                                duration_ms=int(_tool_duration * 1000),
+                                success=bridge_result.status,
+                            )
 
                         # 流式回调: 工具结果
                         if self.stream_callback:
@@ -536,24 +661,31 @@ class AsyncBaseAgent:
                     continue  # 回到 THINKING
 
                 # ── 既无内容也无工具调用 ──
-                self._log_state(f"LLM 返回空响应 (step {step + 1})")
+                logger.warning(f"[{self.name}] ⚠️ LLM 返回空响应 (step {step + 1})")
                 break
 
             # max_steps 耗尽
             timeout_msg = f"任务在 {self.max_tool_steps} 步内未完成。"
-            self._log_state(timeout_msg)
+            logger.warning(f"[{self.name}] ⏰ 超时: {timeout_msg}")
             await self._respond(event, timeout_msg, success=False)
             self.state = AgentState.IDLE
 
         except asyncio.CancelledError:
-            self._log_state("任务被取消")
+            logger.info(f"[{self.name}] 🛑 任务被取消")
             self.state = AgentState.IDLE
             raise
         except Exception as e:
-            logger.exception(f"Agent {self.name} 处理异常: {e}")
+            logger.error(f"[{self.name}] ❌ 异常 (step {step + 1}): {e}")
             # Phase 5: 情绪触发
             if self.emotion_engine:
                 self.emotion_engine.on_task_failure()
+            # 结构化日志: error
+            if self.structured_log:
+                await self.structured_log.agent_error(
+                    error_type=type(e).__name__,
+                    error_msg=str(e),
+                    step=step + 1,
+                )
             await self._respond(event, f"处理出错: {e}", success=False)
             self.state = AgentState.IDLE
             self.stats.tasks_failed += 1
@@ -606,6 +738,23 @@ class AsyncBaseAgent:
         self._interrupt_flag.clear()
         self._log_state(f"已中断: {reason}")
 
+    # ── 对话检测 ────────────────────────────────────────────────────
+
+    def _is_casual_chat(self, message: str) -> bool:
+        """判断是否为闲聊（跳过规划 + 直接 finalAnswer）"""
+        msg = message.strip().lower()
+        # 长度 < 15 且不含动作关键词 → 闲聊
+        action_keywords = [
+            "挖", "砍", "去", "过来", "走", "找", "拿", "放", "做", "建",
+            "收集", "攻击", "跑", "跳", "合成", "打开", "看", "给",
+            "mine", "dig", "go", "come", "find", "craft", "place", "build",
+            "attack", "get", "give", "move", "follow",
+        ]
+        is_short = len(message.strip()) < 15
+        has_action = any(kw in msg for kw in action_keywords)
+        is_question = "?" in msg or "？" in msg
+        return is_short and not has_action and not is_question
+
     # ── 主动行为检测 ────────────────────────────────────────────────
 
     def _detect_proactive_action(self) -> Optional[str]:
@@ -636,13 +785,14 @@ class AsyncBaseAgent:
     # ── 聊天检测 ────────────────────────────────────────────────────
 
     def _should_respond_to_chat(self, player: str, message: str) -> bool:
-        """判断是否应该响应聊天消息"""
-        # 响应直接提到 Agent 名字的消息
-        if self.name.lower() in message.lower():
-            return True
-        # 响应求助类关键词
-        help_keywords = ["帮忙", "帮帮我", "help", "救", "救命", "怎么做"]
-        if any(kw in message.lower() for kw in help_keywords):
+        """判断是否应该响应聊天消息 — 仅响应 @ai 开头的消息"""
+        if not message or not message.strip():
+            return False
+        # 过滤自己的消息
+        if player == self.name or player == self.bridge.agent_name:
+            return False
+        # 只有 @ai 开头才响应
+        if message.strip().startswith("@ai"):
             return True
         return False
 

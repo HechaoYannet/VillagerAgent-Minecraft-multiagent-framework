@@ -14,7 +14,7 @@ LLM 模型工厂 — Phase 3 重构
     from model.init_model import init_language_model
 
     model = init_language_model({
-        "api_model": "deepseek-v4",
+        "api_model": "deepseek-v4-flash",
         "api_key": "sk-...",
         "api_base": "https://api.deepseek.com/v1",
     })
@@ -34,7 +34,7 @@ def init_language_model(args: dict, use_new_client: bool = True) -> Any:
 
     Args:
         args: 配置字典，包含:
-            - api_model: 模型名称 (如 "deepseek-v4", "gpt-4o", "qwen-max")
+            - api_model: 模型名称 (如 "deepseek-v4-flash", "gpt-4o", "qwen-max")
             - api_key: API 密钥
             - api_base: API 基础 URL
             - api_key_list: 多 API Key 列表 (可选)
@@ -85,6 +85,7 @@ def _init_openai_compat(args: dict, use_new_client: bool = True) -> Any:
     api_base = args.get("api_base", "")
     api_key_list = args.get("api_key_list", [])
     role_name = args.get("role_name", "")
+    enable_thinking = args.get("enable_thinking", True)
 
     if use_new_client:
         from src.llm.openai_compat import OpenAICompatClient
@@ -103,6 +104,7 @@ def _init_openai_compat(args: dict, use_new_client: bool = True) -> Any:
             retry_base_delay=1.0,
             retry_max_delay=60.0,
             strip_reasoning=True,
+            enable_thinking=enable_thinking,
         )
     else:
         # 回退到旧版 OpenAILanguageModel
@@ -205,10 +207,11 @@ def init_model_from_config(config: dict, role_name: str = "") -> Any:
 
     支持的 YAML 格式:
         llm:
-          api_model: "deepseek-v4"
+          api_model: "deepseek-v4-flash"
           api_key: "${DEEPSEEK_API_KEY}"
           api_base: "https://api.deepseek.com/v1"
           api_key_list: ["key1", "key2"]
+          enable_thinking: false  # 禁用 LLM 思考模式
 
     Args:
         config: YAML 配置字典 (llm 节点)
@@ -236,5 +239,8 @@ def init_model_from_config(config: dict, role_name: str = "") -> Any:
 
     args["api_key_list"] = llm_config.get("api_key_list", [])
     args["role_name"] = role_name
+
+    # 思考模式控制
+    args["enable_thinking"] = llm_config.get("enable_thinking", True)
 
     return init_language_model(args)

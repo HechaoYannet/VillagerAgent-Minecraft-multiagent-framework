@@ -35,7 +35,7 @@ from src.core.agent import AsyncBaseAgent
 from src.core.bridge import MinecraftBridge
 from src.core.event_bus import Event, EventBus, EventType, make_interrupt, make_timer
 from src.core.tools import ToolRegistry
-from src.llm.factory import init_language_model
+from src.llm.factory import init_language_model, init_model_from_config
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +225,8 @@ class AgentController:
         cfg = self._agent_configs[name]
 
         # 初始化 LLM 客户端
-        llm = init_language_model(cfg.llm)
+        # init_model_from_config 处理 model/api_model 字段映射 + 环境变量
+        llm = init_model_from_config(cfg.llm)
 
         # Phase 4: 初始化持久化记忆
         from src.core.world_config import WorldConfig

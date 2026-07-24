@@ -14,7 +14,7 @@ JSONL 格式 (每行一个 JSON 对象), 支持:
 
 用法:
     log = StructuredLogger(agent_name="Bot1")
-    log.llm_request(model="deepseek-v4", prompt_tokens=1024, ...)
+    log.llm_request(model="deepseek-chat", prompt_tokens=1024, ...)
     log.agent_action("mineBlock", {"x":10,"y":64,"z":20}, result, 1.5)
     log.chat("Steve", "你好", "outgoing")
 """
@@ -177,6 +177,17 @@ class StructuredLogger:
             "retry_count": retry_count,
         }
         await self._append_jsonl(os.path.join(self._llm_dir, "errors.jsonl"), entry)
+
+    async def agent_error(self, error_type: str, error_msg: str, step: int = 0):
+        """记录 Agent 处理错误"""
+        entry = {
+            "timestamp": _now(),
+            "agent": self.agent_name,
+            "error_type": error_type,
+            "error_message": error_msg[:500],
+            "step": step,
+        }
+        await self._append_jsonl("errors.jsonl", entry)
 
     # ── 系统日志 ──────────────────────────────────────────────────────
 

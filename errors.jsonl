@@ -1,0 +1,3 @@
+{"timestamp": "2026-07-24T14:05:12", "agent": "伙伴", "error_type": "KeyError", "error_message": "slice(None, 150, None)", "step": 1}
+{"timestamp": "2026-07-24T14:06:34", "agent": "伙伴", "error_type": "BadRequestError", "error_message": "Error code: 400 - {'error': {'message': \"An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'. (insufficient tool messages following tool_calls message)\", 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_request_error'}}", "step": 1}
+{"timestamp": "2026-07-24T14:15:23", "agent": "伙伴", "error_type": "KeyError", "error_message": "slice(None, 150, None)", "step": 2}

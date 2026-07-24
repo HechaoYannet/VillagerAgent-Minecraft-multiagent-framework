@@ -7,8 +7,17 @@
 前置条件:
     1. Minecraft 服务器运行在 localhost:25565 (Fabric 1.21.1 + EasyAuth)
     2. Flask Bot 服务器运行在 localhost:5000 (env/minecraft_server.py)
-    3. Bot 账号已在 EasyAuth 注册 (VillagerAgent / botpass123)
+    3. EasyAuth 配置:
+       - 如使用 globalPassword 模式 (推荐): 设置环境变量 EASYAUTH_PASSWORD
+       - 如使用注册模式: 设置环境变量 EASYAUTH_PASSWORD + EASYAUTH_FORCE_LOGIN=false
     4. Node.js + npm 依赖已安装在 js_bridge/
+
+环境变量:
+    EASYAUTH_PASSWORD        — EasyAuth 全局密码 / 注册密码
+    EASYAUTH_FORCE_LOGIN     — true: globalPassword 模式; false: 自动检测 (默认)
+    MINECRAFT_HOST           — MC 服务器地址 (默认 localhost)
+    MINECRAFT_PORT           — MC 服务器端口 (默认 25565)
+    FLASK_BOT_PORT           — Flask 服务器端口 (默认 5000)
 
 用法:
     python tests/test_e2e.py              # 自动检测服务器可用性
@@ -280,6 +289,106 @@ async def test_controller():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Test 7: EasyAuth 自动登录检测
+# ═══════════════════════════════════════════════════════════════════════════════
+async def test_easyauth():
+    print("\n7. EasyAuth 自动登录检测")
+    import os
+
+    easyauth_password = os.environ.get("EASYAUTH_PASSWORD", "")
+    easyauth_force_login = os.environ.get("EASYAUTH_FORCE_LOGIN", "false").lower() == "true"
+
+    check("EasyAuth — EASYAUTH_PASSWORD 已设置",
+          bool(easyauth_password) or None,  # SKIP if not set (optional config)
+          "设置 export EASYAUTH_PASSWORD='your_password' 以启用自动登录")
+    check("EasyAuth — EASYAUTH_FORCE_LOGIN 模式",
+          True, f"当前: {'globalPassword /login 模式' if easyauth_force_login else '自动检测 /login 或 /register'}")
+
+    if not easyauth_password:
+        print("     💡 提示: 设置 EASYAUTH_PASSWORD 环境变量以启用 EasyAuth 自动登录")
+        print("        globalPassword 模式: export EASYAUTH_PASSWORD='密码' EASYAUTH_FORCE_LOGIN=true")
+        print("        注册模式: export EASYAUTH_PASSWORD='密码'")
+
+    # Check MC server EasyAuth config
+    mc_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                  "..", "mc-server", "config", "EasyAuth", "main.conf")
+    mc_config_path = os.path.normpath(mc_config_path)
+    if os.path.exists(mc_config_path):
+        with open(mc_config_path) as f:
+            content = f.read()
+        has_global_pw = "enable-global-password=true" in content
+        single_use = "single-use-global-password=true" in content
+        mode = ("globalPassword 模式 (disableRegister)" if has_global_pw and not single_use
+                else "注册模式 (globalPassword 一次性)" if has_global_pw and single_use
+                else "普通注册/登录模式")
+        check(f"EasyAuth — MC 服务器配置 ({mode})", True)
+    else:
+        check(f"EasyAuth — MC 服务器配置", None,
+              f"未找到 EasyAuth 配置文件 ({mc_config_path})")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Test 8: 完整集成管道 (REAL 模式，需要 Flask + MC)
+# ═══════════════════════════════════════════════════════════════════════════════
+async def test_full_pipeline_real():
+    print("\n8. 完整集成管道 (REAL)")
+    from src.core.event_bus import EventBus, make_user_input
+    from src.core.bridge import MinecraftBridge, BridgeMode
+    from src.core.tools import ToolRegistry, MINECRAFT_TOOL_DEFINITIONS
+
+    if not await check_server("http://localhost:5000/post_ping"):
+        check("集成管道", None, "Flask 服务器不可达 — 启动 env/minecraft_server.py")
+        return
+
+    bus = EventBus(history_size=500)
+    bridge = MinecraftBridge(event_bus=bus, mode=BridgeMode.REAL, base_url="http://localhost:5000")
+    await bridge.start()
+    await bus.start()
+
+    try:
+        # 注册所有 Minecraft 工具
+        tools = ToolRegistry()
+        for td in MINECRAFT_TOOL_DEFINITIONS:
+            tools.register(td.name, td.description, list(td.parameters),
+                          category="minecraft",
+                          handler=lambda **k: {"status": True})
+
+        check("集成 — 工具全部注册", len(tools.get_openai_tools()) >= 15)
+        check("集成 — EventBus 运行", bus.is_running)
+        check("集成 — Bridge REAL 模式", bridge.mode == BridgeMode.REAL)
+
+        # 测试基本世界交互
+        try:
+            world = await bridge.get_world_state()
+            check("集成 — 获取世界状态", isinstance(world, dict) and len(world) > 0)
+            if world:
+                print(f"     Bot 位置: {world.get('my_position', '?')}")
+                print(f"     在线玩家: {world.get('players', '?')}")
+        except Exception as e:
+            check("集成 — 获取世界状态", False, f"{type(e).__name__}: {e}")
+
+        # 测试聊天发送
+        try:
+            await bridge.send_chat("[VillagerAgent] E2E 集成测试 — 系统正常")
+            check("集成 — 发送聊天", True)
+        except Exception as e:
+            check("集成 — 发送聊天", None, f"{type(e).__name__}: {e}")
+
+        # 测试事件发布
+        evt = make_user_input("查看周围环境", target="Bot", player="E2E-Tester")
+        await bus.publish(evt)
+        await asyncio.sleep(0.3)
+        history = bus.get_history(limit=10)
+        check("集成 — 事件发布/接收", len(history) >= 1)
+
+    except Exception as e:
+        check("集成管道", False, f"{type(e).__name__}: {e}")
+    finally:
+        await bridge.stop()
+        await bus.stop()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════════════════════
 async def main():
@@ -300,6 +409,14 @@ async def main():
 
     print(f"\n模式: {'REAL (连接 Minecraft)' if use_real else 'MOCK (离线模拟)'}")
     print(f"Flask 服务器: {'✅ 运行中' if flask_ok else '❌ 未启动'}")
+    if not flask_ok:
+        print("   💡 启动方法: python env/minecraft_server.py --port 25565 --local_port 5000")
+    if not flask_ok and use_real:
+        print("   ⚠️  REAL 模式需要 Flask 服务器运行，将仅运行 MOCK 测试")
+        use_real = False
+
+    # EasyAuth 检查 (始终运行)
+    await test_easyauth()
 
     # Always run these
     await test_connectivity("real" if use_real else "mock")
@@ -311,8 +428,9 @@ async def main():
         await test_bridge_real()
         await test_flask_endpoints()
         await test_bot_actions()
+        await test_full_pipeline_real()
     else:
-        print("\n2-5. (跳过 — 需要 Flask + Minecraft 服务器)")
+        print("\n2-5, 8. (跳过 — 需要 Flask + Minecraft 服务器)")
 
     # Summary
     print()

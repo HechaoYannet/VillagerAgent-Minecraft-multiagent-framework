@@ -87,17 +87,23 @@ def setup_logging(config: dict):
     logging.getLogger().addHandler(console_handler)
     logging.getLogger().setLevel(level)
 
+    # 抑制第三方库的 HTTP 请求日志（httpx, urllib3）
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
     return logging.getLogger("VillagerAgent")
 
 
-async def run_agent(config: dict, logger: logging.Logger):
+async def run_agent(config: dict, logger: logging.Logger, controller=None):
     """启动 Agent 系统 (Phase 2 事件驱动框架)"""
     from src.core.controller import create_controller_from_config
 
     bridge_mode = config.get("bridge", {}).get("mode", "disabled")
     logger.info(f"启动 Agent 系统 (Bridge 模式: {bridge_mode})...")
 
-    controller = await create_controller_from_config(config, bridge_mode=bridge_mode)
+    if controller is None:
+        controller = await create_controller_from_config(config, bridge_mode=bridge_mode)
     try:
         await controller.run_forever()
     except asyncio.CancelledError:
@@ -107,7 +113,7 @@ async def run_agent(config: dict, logger: logging.Logger):
         logger.info("Agent 系统关闭")
 
 
-async def run_web(config: dict, logger: logging.Logger):
+async def run_web(config: dict, logger: logging.Logger, controller=None):
     """启动 Web 管理后台"""
     if not config.get("web", {}).get("enabled", True):
         logger.info("Web 管理后台已禁用")
@@ -118,8 +124,11 @@ async def run_web(config: dict, logger: logging.Logger):
     host = config.get("web", {}).get("host", "0.0.0.0")
     port = config.get("web", {}).get("port", 8080)
 
+    if controller:
+        set_controller(controller)
+
     logger.info(f"Web 管理后台启动在 http://{host}:{port}")
-    await start_server_async(host=host, port=port, controller=None)  # controller 由 run_agent 注入
+    await start_server_async(host=host, port=port, controller=controller)
     try:
         while True:
             await asyncio.sleep(1)
@@ -138,13 +147,24 @@ async def main_async(config: dict, args: argparse.Namespace):
     logger.info(f"Web 管理后台: {'启用' if config.get('web', {}).get('enabled', True) else '禁用'}")
     logger.info("=" * 60)
 
+    # 如果同时运行 agent 和 web，提前创建 controller 以便共享
+    controller = None
+    if not args.web_only and not args.agent_only:
+        from src.core.controller import create_controller_from_config
+        bridge_mode = config.get("bridge", {}).get("mode", "disabled")
+        controller = await create_controller_from_config(config, bridge_mode=bridge_mode)
+
     tasks = []
 
     if not args.web_only:
-        tasks.append(asyncio.create_task(run_agent(config, logger), name="agent"))
+        tasks.append(asyncio.create_task(
+            run_agent(config, logger, controller=controller), name="agent"
+        ))
 
     if not args.agent_only:
-        tasks.append(asyncio.create_task(run_web(config, logger), name="web"))
+        tasks.append(asyncio.create_task(
+            run_web(config, logger, controller=controller), name="web"
+        ))
 
     if not tasks:
         logger.error("没有任务可运行(--web-only 和 --agent-only 不能同时使用)")

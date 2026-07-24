@@ -1,5 +1,6 @@
 import argparse
 import time
+import logging
 from math import floor
 import names
 from flask import Flask, request, jsonify
@@ -8,6 +9,8 @@ from env_api import *
 from functools import wraps
 import re
 import platform
+
+logger = logging.getLogger(__name__)
 
 system_type = platform.system().lower()
 # sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -61,45 +64,61 @@ bot.loadPlugin(collectBlock.plugin)
 bot.loadPlugin(pvp)
 bot.loadPlugin(minecraftHawkEye)
 
+# ── MC 1.21.1 chat 协议兼容补丁 ──
+# bot._client.chat() 在 minecraft-protocol 1.66+ 已移除, 改用 chat_message/chat_command 数据包
+# require() 不会捕获 Python 局部变量, 避免 eval_js 序列化 Flask request proxy 的问题
+_chat_patch_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chat_patch_1_21.js")
+_chat_patch = require(_chat_patch_path)
+_chat_patch(bot)
+
 VISIBLE_ONLY = True # 是否只看到可见的方块 | False: 开金手指
 
 mount_state = False
 
 # 定义修饰器
 def log_activity(bot):
+    """工具调用日志装饰器 — 仅连接错误时重建 bot，其他异常直接返回错误"""
     def decorator(func):
         @wraps(func)
         def wrapper(*call_args, **kwargs):
-            # 在函数执行前打印
-            # bot.chat(f"{bot.username} is going to do task: {func.__name__}")
             try:
-                # 执行函数
-                result = func(*call_args, **kwargs) # 这里可以增加更多的反馈信息
-                # 在函数执行后打印(\1\n@log)
-                # bot.chat(f"{bot.username} has done task: {func.__name__}")
+                result = func(*call_args, **kwargs)
                 return result
             except Exception as e:
-                # 如果发生异常，打印异常信息
-                # bot.chat(f"{bot.username} Error in task: {func.__name__} - {str(e)}")
-                # raise e
-                global bot
-                # bot.chat(f"/tellraw {bot.username} Status Error in task: {func.__name__}: Try to restart the bot")
-                bot = mineflayer.createBot({
-                    "host": args.host,
-                    "port": args.port,
-                    'username': args.username.replace(' ', '_'),
-                    'checkTimeoutInterval': 600000,
-                    'auth': 'offline',
-                    'version': '1.21.1',
-                })
-                Item = require("prismarine-item")(bot.registry)
+                error_str = str(e)
+                # 判断是否为连接级错误 (需要重建 bot)
+                _fatal_keywords = [
+                    "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT",
+                    "socket closed", "not connected", "Connection lost",
+                    "Read timed out", "connect ETIMEDOUT",
+                ]
+                is_fatal = any(kw in error_str for kw in _fatal_keywords)
 
-                bot.loadPlugin(pathfinder.pathfinder)
-                bot.loadPlugin(collectBlock.plugin)
-                bot.loadPlugin(pvp)
-                bot.loadPlugin(minecraftHawkEye)
-                # 这里改成重新启动bot
-                return jsonify({'message': f"Exception in task {func.__name__}: {str(e)}", 'status': False, "new_events": []})
+                if is_fatal:
+                    logger.error(f"连接级异常 in {func.__name__}: {e}, 尝试重建 bot")
+                    global bot
+                    import time as _time
+                    _time.sleep(2)  # 等待旧连接彻底断开
+                    new_username = args.username.replace(' ', '_') + f"_{int(_time.time()) % 100000}"
+                    bot = mineflayer.createBot({
+                        "host": args.host,
+                        "port": args.port,
+                        'username': new_username,
+                        'checkTimeoutInterval': 600000,
+                        'auth': 'offline',
+                        'version': '1.21.1',
+                    })
+                    Item = require("prismarine-item")(bot.registry)
+                    bot.loadPlugin(pathfinder.pathfinder)
+                    bot.loadPlugin(collectBlock.plugin)
+                    bot.loadPlugin(pvp)
+                    bot.loadPlugin(minecraftHawkEye)
+                    # 重新注入 chat 补丁
+                    _chat_patch(bot)
+                    return jsonify({'message': f"Bot 已重建 (new username: {new_username}), 原任务 {func.__name__} 失败: {e}", 'status': False, "new_events": []})
+                else:
+                    logger.warning(f"工具 {func.__name__} 执行异常 (不重建): {e}")
+                    return jsonify({'message': f"Error in task {func.__name__}: {e}", 'status': False, "new_events": []})
 
         return wrapper
     return decorator
@@ -318,13 +337,22 @@ def dismantle():
 def find():
     """find name distance count: find tag in the distance, and count is the number of items you want to find."""
     data = request.get_json()
-    name, distance, count = data.get('name'), data.get('distance'), data.get('count')
+    name = data.get('name')
+    distance = data.get('distance', 16)
+    count = data.get('count', 3)
+
+    if not name:
+        name = ""
+    if not distance:
+        distance = 16
+    if not count:
+        count = 3
 
     if name == "carrot":
         name = "carrots"
     elif name == "potato":
         name = "potatoes"
-        
+
     origin_name = name
     center_pos = bot.entity.position
     # 随机移动一下 防止卡住
@@ -431,6 +459,9 @@ def move_to_():
     """move_to name: move to the entity by name or postion x y z."""
     data = request.get_json()
     name = data.get('name')
+    if not name:
+        events = info_bot.get_action_description_new()
+        return jsonify({'message': "move_to 需要指定目标名称或坐标", 'status': False, "new_events": events})
     envs_info = get_envs_info(bot, 128)
     tag, msg = move_to_nearest_(pathfinder, bot, Vec3, envs_info, mcData, 3, name)
     done = tag
@@ -445,6 +476,9 @@ def move_to_pos():
     """move_to_pos x y z: move to the position x y z."""
     data = request.get_json()
     x, y, z = data.get('x'), data.get('y'), data.get('z')
+    if x is None or y is None or z is None:
+        events = info_bot.get_action_description_new()
+        return jsonify({'message': "move_to_pos 需要指定坐标 x, y, z", 'status': False, "new_events": events})
     tag1, msg1 = move_to(pathfinder, bot, Vec3, 3, Vec3(x, y, z))
     tag2, msg2 = move_to(pathfinder, bot, Vec3, 2, Vec3(x, y, z))
     tag3, msg3 = move_to(pathfinder, bot, Vec3, 1, Vec3(x, y, z))
@@ -517,6 +551,9 @@ def dig():
     """dig x y z: dig block at x y z."""
     data = request.get_json()
     x, y, z = data.get('x'), data.get('y'), data.get('z')
+    if x is None or y is None or z is None:
+        events = info_bot.get_action_description_new()
+        return jsonify({'message': "dig 需要指定坐标 x, y, z", 'status': False, "new_events": events})
     msg, tag = dig_at(bot, pathfinder, Vec3, (x, y, z))
     events = info_bot.get_action_description_new()
     return jsonify({'message': msg, 'status': tag, "new_events": events})
@@ -528,7 +565,15 @@ def place():
     status = False
     """place item_name x y z facing: place item at x y z, facing is one of [W, E, S, N, x, y, z, A]."""
     data = request.get_json()
-    item_name, x, y, z, facing = data.get('item_name'), data.get('x'), data.get('y'), data.get('z'), data.get('facing')
+    item_name = data.get('item_name')
+    x, y, z = data.get('x'), data.get('y'), data.get('z')
+    facing = data.get('facing')
+    if not item_name:
+        events = info_bot.get_action_description_new()
+        return jsonify({'message': "place 需要指定 item_name", 'status': False, "new_events": events})
+    if x is None or y is None or z is None:
+        events = info_bot.get_action_description_new()
+        return jsonify({'message': "place 需要指定坐标 x, y, z", 'status': False, "new_events": events})
     orig_block = bot.blockAt(Vec3(x, y, z))['name']
     if "minecart" in item_name.lower().replace(" ", "_") \
         or "seeds" in item_name.lower().replace(" ", "_") \
@@ -705,35 +750,81 @@ def environment():
     return jsonify({'message': msg, 'status': done, "new_events": events})
 
 @app.route('/post_environment_dict', methods=['POST'])
-@log_activity(bot)  # 获取环境信息
+@log_activity(bot)
 def environment_info():
-    """environment:  to get the environment info."""
-    msg = get_envs_info_dict(bot, RENDER_DISTANCE=10, same_entity_num=3)
-    blocks = info_bot.get_blocks_nearby()
-    hint, tag = readNearestSign(bot, Vec3, mcData, max_distance=10)
+    """scanNearbyBlocks / getInventory: 获取环境信息 / 库存信息"""
+    data = request.get_json(silent=True) or {}
+    radius = data.get('radius', 16)
+    block_filter = data.get('block_name', '')
 
-    # filter the blocks
-    # blocks = [block for block in blocks if "slime" not in str(block) and "armor_stand" not in str(block)]
-    
+    msg = get_envs_info_dict(bot, RENDER_DISTANCE=radius, same_entity_num=3)
+    hint, tag = readNearestSign(bot, Vec3, mcData, max_distance=min(radius, 16))
+
+    # 搜索方块：指定名称时用原生 findBlocks，否则用缓存
+    if block_filter:
+        blocks = _find_blocks_native(block_filter, radius)
+    else:
+        blocks = info_bot.get_blocks_nearby()
+
     if "cannot find" in hint:
         hint = ""
     msg["blocks"] = blocks
     msg["sign"] = hint
-    # filter the events
     msg['events'] = []
 
-    # if os.path.exists(".cache/env.cache"):
-    #     with open(".cache/env.cache", "r") as f:
-    #         cache = json.load(f)
-    #     # 找到距离小于5的cache
-    #     for c in cache:
-    #         pos = c["center"]
-    #         if (pos[0] - bot.entity.position.x) ** 2 + (pos[1] - bot.entity.position.y) ** 2 + (
-    #                 pos[2] - bot.entity.position.z) ** 2 < 25:
-    #             msg["sign"] += f"The subtask in this room: {c['task_description']}"
-    #             msg["sign"] += f"The env in the room: {c['state']}"
     done = True
     return jsonify({'message': msg, 'status': done, "new_events": []})
+
+
+@app.route('/post_world_info', methods=['POST'])
+@log_activity(bot)
+def world_info():
+    """getWorldInfo: 仅返回世界状态 (时间/天气/位置/血量)——不返回方块/库存"""
+    msg = get_envs_info_dict(bot, RENDER_DISTANCE=16, same_entity_num=3)
+    # 移除不需要的字段——方块/库存/事件等
+    msg.pop('blocks', None)
+    msg.pop('inventory', None)
+    msg.pop('I_held_item', None)
+    msg.pop('equipment', None)
+    msg.pop('events', None)
+    msg.pop('sign', None)
+    msg.pop('nearby_entities', None)
+    return jsonify({'message': msg, 'status': True, "new_events": []})
+
+
+def _find_blocks_native(block_name: str, distance: int, count: int = 32) -> list[dict]:
+    """使用 Minecraft 原生 bot.findBlocks() 搜索方块"""
+    from math import floor
+    try:
+        matching = findSomething(bot, mcData, block_name, 'block')
+        if matching[0] is None:
+            logger.warning(f"findBlocks: 方块 '{block_name}' 不在 mcData 中")
+            return []
+        positions = bot.findBlocks({
+            "point": bot.entity.position,
+            "matching": matching[0],
+            "maxDistance": min(distance, 64),
+            "count": count,
+        })
+    except Exception as e:
+        logger.warning(f"findBlocks 失败: {e}")
+        return []
+
+    blocks = []
+    for pos in positions:
+        try:
+            block = bot.blockAt(pos)
+            if block:
+                blocks.append({
+                    "name": block.get("name", block_name),
+                    "position": [floor(pos.x), floor(pos.y), floor(pos.z)],
+                })
+        except Exception:
+            blocks.append({
+                "name": block_name,
+                "position": [floor(pos.x), floor(pos.y), floor(pos.z)],
+            })
+    return blocks
 
 
 @app.route('/post_entity', methods=['POST'])
@@ -1108,14 +1199,20 @@ def talk_to():
 @app.route('/post_wait_for_feedback', methods=['POST'])
 @log_activity(bot)
 def wait_for():
-    """talk_to entity_name message:  to talk to the entity."""
+    """wait seconds [entity_name]: 等待指定秒数，可选等待特定实体回复."""
     data = request.get_json()
-    entity_name, seconds = data.get('entity_name'), data.get('seconds')
+    entity_name = data.get('entity_name', '')
+    seconds = data.get('seconds', 5)
 
-    # 首先提醒目标用户，然后等待回复
+    # 如果没有指定实体名称，只是简单等待
+    if not entity_name:
+        time.sleep(seconds)
+        events = info_bot.get_action_description_new()
+        return jsonify({'message': f"等待了 {seconds} 秒", 'status': True, "new_events": events})
+
+    # 等待特定实体的回复
     chat_long(bot, entity_name, f"I am waiting for feedback, please reply in {seconds} seconds.", "talk")
 
-    # 等待回复
     start_time = time.time()
     while time.time() - start_time < seconds:
         tag, message = info_bot.check_new_reply_from(entity_name)
@@ -1123,7 +1220,7 @@ def wait_for():
             events = info_bot.get_action_description_new()
             return jsonify({'message': f"I receive feedback from {entity_name}: {message}", 'status': True, "new_events": events})
         time.sleep(1)
-    
+
     events = info_bot.get_action_description_new()
     return jsonify({'message': f"I don't receive feedback from {entity_name} in {seconds} seconds.", 'status': False, "new_events": events})
 
@@ -1332,6 +1429,101 @@ def position_to_string(position):
         except:
             return f"({position})"
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# EasyAuth 自动登录 — 必须在模块级别注册 (spawn 之前就触发)
+# 因为 EasyAuth 在 spawn 前拦截，如果放在 spawn 里会形成死锁
+# ═══════════════════════════════════════════════════════════════════════════════
+_easyauth_password = os.environ.get("EASYAUTH_PASSWORD", "")
+_easyauth_force_login = os.environ.get("EASYAUTH_FORCE_LOGIN", "false").lower() == "true"
+_easyauth_attempted = False
+
+if _easyauth_password:
+    print(f"[EasyAuth] 模块级注册 (force_login={_easyauth_force_login})")
+
+    # 方案 A: 在 login 事件时主动登录 (login 在 spawn 之前触发)
+    @On(bot, 'login')
+    def easyauth_on_login(*args):
+        global _easyauth_attempted
+        if _easyauth_attempted:
+            return
+        _easyauth_attempted = True
+        print(f"[EasyAuth] login 事件触发, 2s 后主动发送 /login ...")
+        time.sleep(2)
+        bot.chat(f"/login {_easyauth_password}")
+        print(f"[EasyAuth] 已发送: /login ***")
+
+    # 方案 B: 消息监听 — 兜底 (可能走 messagestr 也可能走 systemChat)
+    @On(bot, 'messagestr')
+    def easyauth_on_msg(this, message, messagePosition, *args):
+        msg = str(message)
+        msg_lower = msg.lower()
+        # 调试日志
+        if any(kw in msg_lower for kw in ("login", "/register", "password", "密码", "登录", "注册")):
+            print(f"[EasyAuth:msg] [{messagePosition}] {msg[:250]}")
+
+        ask_login = any(kw in msg_lower for kw in ("/login", "please login", "请登录"))
+        ask_register = any(kw in msg_lower for kw in ("/register", "please register", "请注册"))
+        is_result = any(kw in msg_lower for kw in (
+            "success", "successful", "wrong", "incorrect", "密码错误", "登录成功", "注册成功",
+        ))
+
+        if (ask_login or ask_register) and not is_result:
+            global _easyauth_attempted
+            _easyauth_attempted = True
+            if _easyauth_force_login:
+                print(f"[EasyAuth] 检测到登录要求, 发送 /login (globalPassword 模式)")
+                bot.chat(f"/login {_easyauth_password}")
+            elif ask_register:
+                print(f"[EasyAuth] 检测到注册要求, 发送 /register")
+                bot.chat(f"/register {_easyauth_password} {_easyauth_password}")
+            else:
+                print(f"[EasyAuth] 检测到登录要求, 发送 /login")
+                bot.chat(f"/login {_easyauth_password}")
+else:
+    print("[EasyAuth] 未配置 EASYAUTH_PASSWORD 环境变量，跳过自动登录")
+
+# ── Vanilla 聊天消息捕获 ──
+# mineflayer 4.x + MC 1.21.1: chat 事件格式已变更, 直接用 messagestr 兜底
+# messagePosition == 'chat' → 玩家聊天; messagePosition == 'system' → 系统消息
+@On(bot, 'messagestr')
+def _vanilla_chat_capture(this, message, messagePosition, *args):
+    """捕获所有 vanilla 聊天消息存入 info_bot.chat_queue"""
+    msg_str = str(message)
+    # 跳过 auth 相关消息 (由 EasyAuth handler 处理)
+    if any(kw in msg_str.lower() for kw in ("/login", "/register", "password", "密码")):
+        return
+    # 跳过 bot 自己的消息
+    sender = "unknown"
+    if len(args) >= 2:
+        sender = str(args[1]) if args[1] else sender
+    if "sender" in str(type(args[0])).lower() if args else False:
+        # 如果第一个额外参数是 sender 对象（1.21 messagestr 签名）
+        pass
+
+    # 从消息体尝试提取发送者 (<Player> ...)
+    sender_match = re.match(r'^(?:\[Not Secure\]\s*)?<(\w+)>\s*(.*)', msg_str)
+    if sender_match:
+        sender = sender_match.group(1)
+        clean_msg = sender_match.group(2)
+    else:
+        clean_msg = msg_str
+
+    if sender == bot.entity.username if bot.entity else None:
+        return
+
+    # 只保留玩家聊天 (跳过纯系统消息)
+    if messagePosition == "chat" or sender_match:
+        info_bot.chat_queue.append({
+            "text": clean_msg,
+            "player": sender,
+            "raw": msg_str,
+            "position": str(messagePosition),
+        })
+        # 限制队列长度
+        if len(info_bot.chat_queue) > 50:
+            info_bot.chat_queue = info_bot.chat_queue[-50:]
+
+
 @On(bot, 'spawn')
 def handleViewer(*args):
     # Stream frames over tcp to a server listening on port 8089, ends when the application stop
@@ -1449,71 +1641,79 @@ def handleViewer(*args):
                     pass
 
     @On(bot, "entitySpawn")
-    def entitySpawn(this, entity):
-        if entity.type == "mob":
-            p = entity.position
-            if "Slime" != entity.displayName: # Noisy
-                info_bot.add_event("entitySpawn", info_bot.existing_time, f"A {entity.displayName} spawned", True, acition=False)
-            # console.log(f"Look out! A {entity.displayName} spawned at {p.toString()}")
-        elif entity.type == "player":
+    def entitySpawn(this, entity, *args):
+        try:
+            if entity.type == "mob":
+                p = entity.position
+                if "Slime" != entity.displayName: # Noisy
+                    info_bot.add_event("entitySpawn", info_bot.existing_time, f"A {entity.displayName} spawned", True, acition=False)
+            elif entity.type == "player":
+                pass
+            elif entity.type == "object":
+                p = entity.position
+                info_bot.add_event("entitySpawn", info_bot.existing_time, f"There's a {entity.displayName}", True)
+            elif entity.type == "global":
+                pass
+            elif entity.type == "orb":
+                info_bot.add_event("entitySpawn", info_bot.existing_time, f"Experience orb at {position_to_string(entity.position)}", True)
+        except Exception:
             pass
-            # bot.chat(f"Look who decided to show up: {entity.username}")
-        elif entity.type == "object":
-            p = entity.position
-            info_bot.add_event("entitySpawn", info_bot.existing_time, f"There's a {entity.displayName}", True)
-            # console.log(f"There's a {entity.displayName} at {p.toString()}")
-        elif entity.type == "global":
-            pass
-            # bot.chat("Ooh lightning!")
-        elif entity.type == "orb":
-            info_bot.add_event("entitySpawn", info_bot.existing_time, f"Experience orb at {position_to_string(entity.position)}", True)
-            # bot.chat("Gimme dat exp orb!")
         
     @On(bot, "entityHurt")
-    def entityHurt(this, entity):
-        if entity.type == "mob":
-            info_bot.add_event("entityHurt", info_bot.existing_time, f"The {entity.displayName} got hurt!", True)
-            # bot.chat(f"Haha! The ${entity.displayName} got hurt!")
-        elif entity.type == "player":
-            if entity.username in bot.players:
-                ping = bot.players[entity.username].ping
-                info_bot.add_event("entityHurt", info_bot.existing_time, f"The {entity.username} got hurt.", True)
-                # bot.chat(f"Aww, poor {entity.username} got hurt. Maybe you shouldn't have a ping of {ping}")
+    def entityHurt(this, entity, *args):
+        try:
+            if entity.type == "mob":
+                info_bot.add_event("entityHurt", info_bot.existing_time, f"The {entity.displayName} got hurt!", True)
+            elif entity.type == "player":
+                if entity.username in bot.players:
+                    ping = bot.players[entity.username].ping
+                    info_bot.add_event("entityHurt", info_bot.existing_time, f"The {entity.username} got hurt.", True)
+        except Exception:
+            pass
     
     @On(bot, "entitySwingArm")
-    def entitySwingArm(this, entity):
+    def entitySwingArm(this, entity, *args):
         # info_bot.add_event("entitySwingArm", info_bot.existing_time, f"{entity.username} is swinging arm.", True)
-        # bot.chat(f"{entity.username}, I see that your arm is working fine.")
         pass
 
     @On(bot, "entityCrouch")
-    def entityCrouch(this, entity):
-        info_bot.add_event("entityCrouch", info_bot.existing_time, f"{entity.username} is crouching.", True)
-        # bot.chat(f"${entity.username}: you so sneaky.")
+    def entityCrouch(this, entity, *args):
+        try:
+            info_bot.add_event("entityCrouch", info_bot.existing_time, f"{entity.username} is crouching.", True)
+        except Exception:
+            pass
 
 
     @On(bot, "entityUncrouch")
-    def entityUncrouch(this, entity):
-        info_bot.add_event("entityUncrouch", info_bot.existing_time, f"{entity.username} is standing up.", True)
-        # bot.chat(f"{entity.username}: welcome back from the land of hunchbacks.")
+    def entityUncrouch(this, entity, *args):
+        try:
+            info_bot.add_event("entityUncrouch", info_bot.existing_time, f"{entity.username} is standing up.", True)
+        except Exception:
+            pass
 
 
     @On(bot, "entitySleep")
-    def entitySleep(this, entity):
-        info_bot.add_event("entitySleep", info_bot.existing_time, f"{entity.username} is sleeping.", True)
-        # bot.chat(f"Good night, {entity.username}")
+    def entitySleep(this, entity, *args):
+        try:
+            info_bot.add_event("entitySleep", info_bot.existing_time, f"{entity.username} is sleeping.", True)
+        except Exception:
+            pass
 
 
     @On(bot, "entityWake")
-    def entityWake(this, entity):
-        info_bot.add_event("entityWake", info_bot.existing_time, f"{entity.username} is awake.", True)
-        # bot.chat(f"Top of the morning, {entity.username}")
+    def entityWake(this, entity, *args):
+        try:
+            info_bot.add_event("entityWake", info_bot.existing_time, f"{entity.username} is awake.", True)
+        except Exception:
+            pass
 
 
     @On(bot, "entityEat")
-    def entityEat(this, entity):
-        info_bot.add_event("entityEat", info_bot.existing_time, f"{entity.username} is eating.", True)
-        # bot.chat(f"{entity.username}: OM NOM NOM NOMONOM. That's what you sound like.")
+    def entityEat(this, entity, *args):
+        try:
+            info_bot.add_event("entityEat", info_bot.existing_time, f"{entity.username} is eating.", True)
+        except Exception:
+            pass
 
 
     @On(bot, "entityAttach")
@@ -1615,12 +1815,21 @@ def handleViewer(*args):
 def handle(this):
     # bot.chat("time")
     info_bot.update_time()
-    with open(".cache/load_status.cache", "r", encoding='utf-8') as f:
-        status_data = json.load(f)
-    if status_data["status"] == "loaded" and info_bot.bot_init:
-        info_bot.follow()
-        info_bot.update_blocks()
-        info_bot.bot_init = False
+    # 只在 bot_init 阶段检查一次状态文件
+    if info_bot.bot_init:
+        try:
+            os.makedirs(".cache", exist_ok=True)
+            with open(".cache/load_status.cache", "r", encoding='utf-8') as f:
+                status_data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            # 首次启动，创建默认缓存文件
+            status_data = {"status": "loaded"}
+            with open(".cache/load_status.cache", "w", encoding='utf-8') as f:
+                json.dump(status_data, f)
+        if status_data.get("status") == "loaded":
+            info_bot.follow()
+            info_bot.update_blocks()
+            info_bot.bot_init = False
 
     # if info_bot.existing_time % 10 == 0:
     #     new_events = info_bot.get_action_description_new()
@@ -1635,6 +1844,7 @@ class Bot():
         self.sleeping = False
         self.bot_init = False
         self.block_map = {}
+        self.chat_queue: list[dict] = []  # 从 messagestr 捕获的 vanilla 聊天消息
 
     def update_blocks(self):
         # bot.chat("update blocks")
@@ -1699,26 +1909,31 @@ class Bot():
         return False, ""
 
     def get_bot_inventory_str(self):
+        if bot.entity is None:
+            return ""
         items = bot.inventory.items()
         item_dict = {}
         for item in items:
             item_dict[item['name']] = item['count']
         if bot.heldItem:
             item_dict["heldItem"] = bot.heldItem.name
-        
+
         item_str = "My inventory: "
         for key, value in item_dict.items():
             item_str += f"{key}: {value} "
 
         local_map = self.get_5x3x5_map()
-        item_str += "Player-Center 5x3x5 Map: \n"
-        for block in local_map:
-            item_str += f"[{block[0]}:{block[1]}] "
-        item_str += "\nYou can use scanNearbyEntities to get blocks or entities around you."
+        if local_map:
+            item_str += "Player-Center 5x3x5 Map: \n"
+            for block in local_map:
+                item_str += f"[{block[0]}:{block[1]}] "
+            item_str += "\nYou can use scanNearbyEntities to get blocks or entities around you."
         return item_str
 
     def get_5x3x5_map(self):
         # 获取3x3的地图, 第一个是方块的名字, 第二个是方块的相对高度
+        if bot.entity is None or bot.entity.position is None:
+            return []
         map_5x3x5 = []
         for i in range(-2, 3):
             for k in range(-2, 3):
@@ -1774,18 +1989,19 @@ def api_action():
 
     # 工具名 → Flask 路由映射
     route_map = {
-        'moveTo': '/post_move_to',
+        'moveTo': '/post_move_to_pos',
+        'followPlayer': '/post_move_to',
         'mineBlock': '/post_dig',
         'placeBlock': '/post_place',
         'getInventory': '/post_environment_dict',
-        'getWorldInfo': '/post_environment_dict',
+        'getWorldInfo': '/post_world_info',
         'scanNearbyEntities': '/post_entity',
-        'scanNearbyBlocks': '/post_environment',
+        'scanNearbyBlocks': '/post_environment_dict',
         'findBlock': '/post_find',
         'equipItem': '/post_equip',
         'attackEntity': '/post_attack',
         'openChest': '/post_open',
-        'interactBlock': '/post_use_on',
+        'interactBlock': '/post_use_on_block',
         'craftItem': '/post_craft',
         'smeltItem': '/post_smelt',
         'finalAnswer': '/post_done',
@@ -1803,21 +2019,39 @@ def api_action():
     # 参数转换 (统一 args → 各路由需要的格式)
     param_map = {
         'moveTo': lambda a: {'x': a.get('x', 0), 'y': a.get('y', 64), 'z': a.get('z', 0)},
+        'followPlayer': lambda a: {'name': a.get('player_name', '')},
         'mineBlock': lambda a: {'x': a.get('x', 0), 'y': a.get('y', 0), 'z': a.get('z', 0)},
         'placeBlock': lambda a: {
-            'block_name': a.get('block_name', 'dirt'),
+            'item_name': a.get('block_name', 'dirt'),
             'x': a.get('x', 0), 'y': a.get('y', 0), 'z': a.get('z', 0),
+            'facing': a.get('facing', 'A'),
         },
         'attackEntity': lambda a: {'name': a.get('entity_name', '')},
-        'findBlock': lambda a: {'name': a.get('block_name', '')},
-        'equipItem': lambda a: {'name': a.get('item_name', '')},
-        'openChest': lambda a: {'x': a.get('x', 0), 'y': a.get('y', 0), 'z': a.get('z', 0)},
-        'interactBlock': lambda a: {'name': a.get('x', 0)},
-        'craftItem': lambda a: {'name': a.get('item_name', ''), 'num': a.get('count', 1)},
-        'smeltItem': lambda a: {'name': a.get('input_item', ''), 'num': a.get('count', 1)},
+        'scanNearbyEntities': lambda a: {'name': a.get('entity_type', '')},
+        'findBlock': lambda a: {
+            'name': a.get('block_name', ''),
+            'distance': a.get('distance', 16),
+            'count': a.get('count', 3),
+        },
+        'equipItem': lambda a: {
+            'item_name': a.get('item_name', ''),
+            'slot': a.get('slot', 'hand'),
+        },
+        'openChest': lambda a: {'item_name': 'chest'},
+        'interactBlock': lambda a: {'x': a.get('x', 0), 'y': a.get('y', 0), 'z': a.get('z', 0), 'item_name': a.get('item_name', '')},
+        'craftItem': lambda a: {'item_name': a.get('item_name', ''), 'count': a.get('count', 1)},
+        'smeltItem': lambda a: {
+            'item_name': a.get('input_item', ''),
+            'item_count': a.get('count', 1),
+            'fuel_item_name': a.get('fuel_item', 'coal'),
+        },
         'sendChat': lambda a: {'msg': a.get('message', '')},
-        'finalAnswer': lambda a: {'final_answer': a.get('summary', '任务完成')},
-        'wait': lambda a: {'seconds': a.get('seconds', 1)},
+        'scanNearbyBlocks': lambda a: {'radius': a.get('radius', 16), 'block_name': a.get('block_name', '')},
+        'finalAnswer': lambda a: {'feedback': a.get('summary', '任务完成')},
+        'wait': lambda a: {
+            'seconds': a.get('seconds', 5),
+            'entity_name': a.get('entity_name', ''),
+        },
     }
 
     transformed = param_map.get(tool_name, lambda a: a)(args)
@@ -1836,19 +2070,39 @@ def api_chat_send():
     data = request.get_json()
     msg = data.get('message', data.get('msg', ''))
     if msg:
-        bot.chat(msg)
+        try:
+            bot.chat(msg)
+        except Exception as e:
+            logger.warning(f"bot.chat 失败: {e}")
+            return jsonify({'status': False, 'message': str(e)}), 500
         return jsonify({'status': True, 'message': 'sent'})
     return jsonify({'status': False, 'message': 'empty message'}), 400
 
 
 @app.route('/api/chat/new', methods=['GET'])
 def api_chat_new():
-    """获取新消息 (Phase 2 Bridge 兼容)"""
-    events = info_bot.get_action_description_new()
+    """获取新聊天消息 (从 vanilla chat 队列 + 动作日志)"""
     chat_messages = []
-    for event in events:
-        if isinstance(event, str) and ('chat' in event.lower() or 'msg' in event.lower()):
-            chat_messages.append({'text': event, 'player': 'server'})
+
+    # 1) 从 vanilla chat 队列弹出消息
+    queue = info_bot.chat_queue
+    while queue:
+        msg = queue.pop(0)
+        chat_messages.append({
+            'text': msg.get("text", msg.get("raw", "")),
+            'player': msg.get("player", "unknown"),
+        })
+
+    # 2) 从动作日志中提取 msg/chat 类事件 (兼容旧 Bridge 逻辑)
+    try:
+        events = info_bot.get_action_description_new()
+        for event in events:
+            text = event if isinstance(event, str) else event.get("description", "")
+            if isinstance(text, str) and ('chat' in text.lower() or 'msg' in text.lower()):
+                chat_messages.append({'text': text, 'player': 'server'})
+    except Exception as e:
+        logger.warning(f"get_action_description_new 失败: {e}")
+
     return jsonify(chat_messages)
 
 # ── 启动 ──

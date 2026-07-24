@@ -23,30 +23,77 @@
 </div>
 
 <script>
-function sendMessage() {
+const chatBox = document.getElementById('chat-box');
+let lastTs = '';
+
+function addMessage(msg, sender, dir) {
+    const div = document.createElement('div');
+    div.className = 'chat-msg ' + (dir === 'outgoing' ? 'chat-outgoing' : 'chat-incoming');
+    const s = document.createElement('div');
+    s.className = 'chat-sender';
+    s.textContent = (dir === 'outgoing' ? '你' : sender) + ' · ' + (msg.timestamp || '');
+    div.appendChild(s);
+    div.appendChild(document.createTextNode(msg.message || msg));
+    chatBox.appendChild(div);
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+async function loadHistory() {
+    const agent = document.getElementById('agent-select').value;
+    try {
+        const res = await fetch('/api/chat/history?agent=' + encodeURIComponent(agent) + '&limit=50');
+        const msgs = await res.json();
+        chatBox.innerHTML = '';
+        if (!msgs.length) {
+            chatBox.innerHTML = '<div style="color:#8b949e;text-align:center;padding-top:160px;">输入消息开始对话</div>';
+        }
+        msgs.forEach(m => {
+            addMessage(m, m.sender, m.direction);
+            if (m.timestamp) lastTs = m.timestamp;
+        });
+    } catch(e) {}
+}
+
+// 轮询新消息
+setInterval(async () => {
+    const agent = document.getElementById('agent-select').value;
+    try {
+        const res = await fetch('/api/chat/history?agent=' + encodeURIComponent(agent) + '&limit=10');
+        const msgs = await res.json();
+        msgs.forEach(m => {
+            if (m.timestamp > lastTs) {
+                addMessage(m, m.sender, m.direction);
+                lastTs = m.timestamp;
+            }
+        });
+    } catch(e) {}
+}, 2000);
+
+async function sendMessage() {
     const input = document.getElementById('chat-input');
     const msg = input.value.trim();
     if (!msg) return;
-
     const agent = document.getElementById('agent-select').value;
-    const box = document.getElementById('chat-box');
 
-    const div = document.createElement('div');
-    div.className = 'chat-msg chat-outgoing';
-    const sender = document.createElement('div');
-    sender.className = 'chat-sender';
-    sender.textContent = `你 → ${agent}`;
-    div.appendChild(sender);
-    div.appendChild(document.createTextNode(msg));
-    box.appendChild(div);
+    // 显示发出的消息
+    addMessage({message: msg, timestamp: ''}, '你', 'outgoing');
     input.value = '';
-    box.scrollTop = box.scrollHeight;
 
-    fetch(`/api/agents/${agent}/command`, {
+    // 保存到历史
+    await fetch('/api/chat/history', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({sender: '你', message: msg, direction: 'outgoing', agent: agent})
+    });
+
+    // 发送指令给 Agent
+    await fetch('/api/agents/' + encodeURIComponent(agent) + '/command', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({message: msg})
     });
 }
+
+loadHistory();
 </script>
 {% endblock %}

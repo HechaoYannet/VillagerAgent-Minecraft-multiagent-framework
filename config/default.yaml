@@ -20,12 +20,12 @@ agents:
 # LLM 配置
 llm:
   provider: "deepseek"  # deepseek | openai | gemini
-  model: "deepseek-v4"
+  model: "deepseek-v4-flash"  # deepseek-v4-flash (轻量) | deepseek-v4-pro (旗舰)
   api_base: "https://api.deepseek.com/v1"
   max_tokens: 4096
   temperature: 0.7
   stream: true
-  enable_thinking: true  # 启用 DeepSeek v4 思考 tokens
+  enable_thinking: false  # deepseek-reasoner 才支持思考 tokens
 
 # 记忆
 memory:
@@ -71,7 +71,12 @@ language: "zh-CN"
 # mock: 模拟 Minecraft 世界 (测试/开发)
 # disabled: 纯 LLM 模式 (无 Minecraft 交互)
 bridge:
-  mode: "disabled"
+  mode: "real"
   flask_port: 5000
   world_poll_interval: 5.0
   chat_poll_interval: 1.0
+
+# EasyAuth 自动登录 (如果 Minecraft 服务器安装了 EasyAuth 模组)
+easyauth:
+  enabled: false
+  force_login: true  # true: globalPassword 模式 (disableRegister); false: 自动检测

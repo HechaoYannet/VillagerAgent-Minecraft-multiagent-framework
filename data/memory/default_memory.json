@@ -1,0 +1,108 @@
+{
+  "world": "default",
+  "updated_at": "2026-07-24T13:54:06",
+  "timeline": [
+    {
+      "timestamp": "2026-07-24T13:42:18",
+      "description": "执行 mineBlock:  dig at (49, 58, -89)",
+      "tags": [
+        "action",
+        "mineBlock"
+      ],
+      "importance": 2,
+      "related_location": null
+    },
+    {
+      "timestamp": "2026-07-24T13:42:24",
+      "description": "执行 mineBlock:  dig at (49, 59, -89)",
+      "tags": [
+        "action",
+        "mineBlock"
+      ],
+      "importance": 2,
+      "related_location": null
+    },
+    {
+      "timestamp": "2026-07-24T13:43:11",
+      "description": "完成任务: 现在是夜晚，怪物很多。询问玩家是否需要你守卫，或者提醒玩家睡觉。 → [伙伴] 😟: 任务完成！我已经向所有玩家发出了雨夜安全提醒，并做好了守卫或帮忙的准备工作。大家在雨夜一定要多加小心！🌙⚡",
+      "tags": [
+        "task",
+        "completed"
+      ],
+      "importance": 3,
+      "related_location": null
+    },
+    {
+      "timestamp": "2026-07-24T13:43:58",
+      "description": "完成任务: [聊天中 EstateUnions 说]: 你好\n你想回复吗？如果不需要回复，忽略即可。 → [伙伴] 🤔 → EstateUnions: 你好呀，EstateUnions！👋 我是村民助手，很高兴认识你！\n\n现在可是雨夜午夜🌙🌧️，外面挺危险的。你找到安全的地方了吗？需要我帮忙做些什么吗？比",
+      "tags": [
+        "task",
+        "completed"
+      ],
+      "importance": 3,
+      "related_location": null
+    },
+    {
+      "timestamp": "2026-07-24T13:45:37",
+      "description": "完成任务: [聊天中 EstateUnions 说]: 你在哪里？\n你想回复吗？如果不需要回复，忽略即可。 → [伙伴] 😴 → EstateUnions: 已经告诉 EstateUnions 我的位置啦～😊 如果他需要我过去帮忙或者找我做其他的事，随时可以再问我！",
+      "tags": [
+        "task",
+        "completed"
+      ],
+      "importance": 3,
+      "related_location": null
+    },
+    {
+      "timestamp": "2026-07-24T13:47:41",
+      "description": "执行 mineBlock:  dig at (71, 60, -103)",
+      "tags": [
+        "action",
+        "mineBlock"
+      ],
+      "importance": 2,
+      "related_location": null
+    },
+    {
+      "timestamp": "2026-07-24T13:49:40",
+      "description": "执行 mineBlock:  dig at (75, 61, -100)",
+      "tags": [
+        "action",
+        "mineBlock"
+      ],
+      "importance": 2,
+      "related_location": null
+    },
+    {
+      "timestamp": "2026-07-24T13:53:53",
+      "description": "执行 mineBlock:  dig at (75, 62, -101)",
+      "tags": [
+        "action",
+        "mineBlock"
+      ],
+      "importance": 2,
+      "related_location": null
+    },
+    {
+      "timestamp": "2026-07-24T13:53:59",
+      "description": "执行 mineBlock:  dig at (76, 63, -101)",
+      "tags": [
+        "action",
+        "mineBlock"
+      ],
+      "importance": 2,
+      "related_location": null
+    },
+    {
+      "timestamp": "2026-07-24T13:54:06",
+      "description": "执行 mineBlock:  dig at (76, 64, -101)",
+      "tags": [
+        "action",
+        "mineBlock"
+      ],
+      "importance": 2,
+      "related_location": null
+    }
+  ],
+  "locations": [],
+  "players": []
+}

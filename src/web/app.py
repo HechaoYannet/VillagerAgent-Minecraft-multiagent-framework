@@ -31,7 +31,6 @@ from typing import Any, Optional
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +47,15 @@ app = FastAPI(
 # 模板目录
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 _TEMPLATE_DIR.mkdir(parents=True, exist_ok=True)
-templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+
+# 使用 Jinja2 Environment 直接渲染 (绕过 Starlette Jinja2Templates 的缓存兼容问题)
+from jinja2 import Environment, FileSystemLoader
+_jinja2_env = Environment(loader=FileSystemLoader(str(_TEMPLATE_DIR)), autoescape=True)
+
+def _render(name: str, context: dict) -> HTMLResponse:
+    """渲染 Jinja2 模板并返回 HTMLResponse"""
+    template = _jinja2_env.get_template(name)
+    return HTMLResponse(template.render(context))
 
 # 静态文件
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -58,6 +65,10 @@ app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 # 全局控制器引用 (在 main.py 中注入)
 _controller: Any = None  # AgentController
 _web_sockets: dict[str, list[WebSocket]] = {}  # agent_name → [ws, ...]
+
+# 聊天历史 (内存存储，重启后丢失)
+_chat_history: list[dict] = []  # [{timestamp, sender, message, direction, agent}, ...]
+_MAX_CHAT_HISTORY = 500  # 最多保留 500 条
 
 
 def set_controller(controller):
@@ -78,8 +89,7 @@ async def dashboard(request: Request):
         health = await _controller.health_check()
         agents = list(health.get("agents", {}).values())
 
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
+    return _render("dashboard.html", {
         "title": "控制台",
         "agents": agents,
         "agent_count": len(agents),
@@ -95,8 +105,7 @@ async def agents_page(request: Request):
         health = await _controller.health_check()
         agents = list(health.get("agents", {}).values())
 
-    return templates.TemplateResponse("agents.html", {
-        "request": request,
+    return _render("agents.html", {
         "title": "Agent 管理",
         "agents": agents,
     })
@@ -111,8 +120,7 @@ async def agent_detail(request: Request, name: str):
         if agent:
             agent_data = agent.get_status()
 
-    return templates.TemplateResponse("agent_detail.html", {
-        "request": request,
+    return _render("agent_detail.html", {
         "title": f"Agent: {name}",
         "agent_name": name,
         "agent": agent_data,
@@ -123,8 +131,7 @@ async def agent_detail(request: Request, name: str):
 async def chat_page(request: Request):
     """对话界面"""
     agents = _controller.agent_names if _controller else []
-    return templates.TemplateResponse("chat.html", {
-        "request": request,
+    return _render("chat.html", {
         "title": "对话",
         "agents": agents,
     })
@@ -133,8 +140,7 @@ async def chat_page(request: Request):
 @app.get("/logs", response_class=HTMLResponse)
 async def logs_page(request: Request):
     """日志查看器"""
-    return templates.TemplateResponse("logs.html", {
-        "request": request,
+    return _render("logs.html", {
         "title": "日志",
     })
 
@@ -236,6 +242,43 @@ async def api_get_llm_logs(limit: int = 50):
         return JSONResponse(data)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 聊天历史 API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/chat/history")
+async def api_get_chat_history(agent: str = "", limit: int = 100):
+    """获取聊天历史"""
+    global _chat_history
+    filtered = [m for m in _chat_history if not agent or m.get("agent") == agent]
+    return JSONResponse(filtered[-limit:])
+
+
+@app.post("/api/chat/history")
+async def api_add_chat_message(request: Request):
+    """添加聊天消息（Web UI 和 Agent 共用）"""
+    global _chat_history
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "无效 JSON"}, status_code=400)
+    msg = {
+        "timestamp": _now_iso(),
+        "sender": body.get("sender", "?"),
+        "message": body.get("message", ""),
+        "direction": body.get("direction", "incoming"),
+        "agent": body.get("agent", ""),
+    }
+    _chat_history.append(msg)
+    if len(_chat_history) > _MAX_CHAT_HISTORY:
+        _chat_history = _chat_history[-_MAX_CHAT_HISTORY:]
+    return JSONResponse({"status": "ok", "count": len(_chat_history)})
+
+
+def _now_iso() -> str:
+    return time.strftime("%H:%M:%S", time.localtime())
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

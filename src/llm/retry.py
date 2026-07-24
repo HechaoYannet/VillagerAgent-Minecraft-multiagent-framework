@@ -312,13 +312,13 @@ async def async_retry(
 
         # 判断是否可重试
         if category == ErrorCategory.AUTH_ERROR:
-            raise  # 认证错误不重试
+            raise last_error  # 认证错误不重试
 
         if category == ErrorCategory.FATAL:
-            raise  # 致命错误不重试
+            raise last_error  # 致命错误不重试
 
         if category == ErrorCategory.RATE_LIMIT and not config.retry_on_rate_limit:
-            raise
+            raise last_error
 
         # 如果是最后一次尝试，不再重试
         if attempt >= config.max_retries:

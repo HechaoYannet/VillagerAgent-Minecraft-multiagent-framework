@@ -37,6 +37,7 @@ from src.core.event_bus import (
     EventBus,
     EventType,
     make_chat,
+    make_interrupt,
     make_timer,
     make_user_input,
     make_world_change,
@@ -153,6 +154,13 @@ class MinecraftBridge:
         self._mock_world = MOCK_WORLD_STATE.copy()
         self._mock_chat_queue: list[dict] = []
 
+        # LLM 开关
+        self._llm_enabled = True
+
+    @property
+    def llm_enabled(self) -> bool:
+        return self._llm_enabled
+
     # ── 生命周期 ──────────────────────────────────────────────────────
 
     async def start(self):
@@ -166,7 +174,11 @@ class MinecraftBridge:
             # 延迟导入 httpx (必需依赖)
             try:
                 import httpx
-                self._http_client = httpx.AsyncClient(timeout=10.0)
+                # 策略超时: 轮询短超时, 动作(寻路/挖掘)需要长超时
+                self._http_client = httpx.AsyncClient(timeout=httpx.Timeout(
+                    timeout=120.0,  # 默认上限
+                    connect=5.0,
+                ))
             except ImportError:
                 raise ImportError(
                     "REAL 模式需要 httpx。请安装: pip install httpx"
@@ -203,21 +215,25 @@ class MinecraftBridge:
 
     # ── HTTP 帮助函数 ────────────────────────────────────────────────
 
-    async def _fetch(self, path: str, method: str = "GET", json_data: dict = None) -> dict:
+    async def _fetch(self, path: str, method: str = "GET", json_data: dict = None, timeout: float = None) -> dict:
         """发送 HTTP 请求到 Flask 服务器"""
         if self.mode != BridgeMode.REAL or not self._http_client:
             return {}
 
         url = f"{self.base_url}{path}"
+        # 动作路由允许更长的超时（寻路可能需要很久）
+        kwargs = {}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         try:
             if method == "GET":
-                resp = await self._http_client.get(url)
+                resp = await self._http_client.get(url, **kwargs)
             else:
-                resp = await self._http_client.post(url, json=json_data)
-            return resp.json() if resp.status_code == 200 else {}
+                resp = await self._http_client.post(url, json=json_data, **kwargs)
+            return resp.json() if resp.status_code == 200 else (resp.json() if resp.content_type == "application/json" else {"status": False, "message": f"HTTP {resp.status_code}"})
         except Exception as e:
             logger.warning(f"HTTP 请求失败 {method} {url}: {e}")
-            return {}
+            return {"status": False, "message": str(e)}
 
     # ── 世界状态轮询 ────────────────────────────────────────────────
 
@@ -261,17 +277,49 @@ class MinecraftBridge:
         if not text:
             return
 
-        # @bot 指令 → USER_INPUT
-        if f"@{self.agent_name}" in text or text.startswith("@bot"):
-            clean_text = text.replace(f"@{self.agent_name}", "").replace("@bot", "").strip()
-            await self.event_bus.publish(make_user_input(
-                message=clean_text,
+        # ── LLM 开关指令 (始终生效，不受 _llm_enabled 影响) ──
+        if text.strip() == "@enable-llm":
+            self._llm_enabled = True
+            logger.info(f"LLM 已启用 (by {player})")
+            await self._send_chat_response(f"[System] LLM 已启用 — @ai 指令现在会处理")
+            return
+
+        if text.strip() == "@disable-llm":
+            self._llm_enabled = False
+            logger.info(f"LLM 已禁用 (by {player})")
+            # 中断 Agent 当前任务 (如果正在处理中)
+            await self.event_bus.publish(make_interrupt(
                 target=self.agent_name,
-                player=player,
+                reason="LLM 已禁用",
             ))
-        else:
-            # 普通聊天 → CHAT
-            await self.event_bus.publish(make_chat(player=player, message=text))
+            await self._send_chat_response(f"[System] LLM 已禁用 — 所有 LLM 调用已停止 (用 @enable-llm 恢复)")
+            return
+
+        # ── LLM 禁用时忽略所有 @ai 指令 ──
+        if not self._llm_enabled:
+            return
+
+        # ── @ai 指令 → USER_INPUT ──
+        if text.startswith("@ai"):
+            clean_text = text[3:].strip()  # 去掉 "@ai" 前缀
+            if clean_text:
+                await self.event_bus.publish(make_user_input(
+                    message=clean_text,
+                    target=self.agent_name,
+                    player=player,
+                ))
+
+    async def _send_chat_response(self, message: str):
+        """发送系统消息到 Minecraft 聊天 (通过 Flask 服务器)"""
+        if self.mode == BridgeMode.REAL:
+            await self._fetch("/api/chat/send", method="POST", json_data={
+                "message": message,
+            })
+        elif self.mode == BridgeMode.MOCK:
+            self._mock_chat_queue.append({
+                "player": "System",
+                "text": message,
+            })
 
     # ── 世界状态查询 ────────────────────────────────────────────────
 
@@ -327,11 +375,11 @@ class MinecraftBridge:
         if self.mode == BridgeMode.MOCK:
             return await self._mock_execute(tool_name, args)
 
-        # REAL 模式 — HTTP 调用 Flask 服务器
+        # REAL 模式 — HTTP 调用 Flask 服务器 (长超时: 寻路可能很慢)
         result = await self._fetch("/api/action", method="POST", json_data={
             "tool": tool_name,
             "args": args,
-        })
+        }, timeout=120.0)
 
         success = result.get("status", False)
         message = result.get("message", str(result))

@@ -163,6 +163,8 @@ class ConversationMemory:
             "{{other_agents}}", ""
         ).replace(
             "{{agent_action_list}}", "暂无操作记录"
+        ).replace(
+            "{{response_style}}", "友好、自然、像朋友聊天，不啰嗦，不刻意展现 AI 特征"
         )
 
     def set_personality(self, personality: dict):
@@ -236,6 +238,27 @@ class ConversationMemory:
             logger = __import__("logging").getLogger(__name__)
             logger.debug(f"消息历史截断: 移除了 {excess} 条旧消息")
 
+    @staticmethod
+    def _strip_orphaned_tool_calls(messages: list[Message]) -> list[Message]:
+        """移除不完整的 AssistantMessage(tool_calls) —— 后面没有对应的 ToolMessage"""
+        result = []
+        for i, msg in enumerate(messages):
+            if isinstance(msg, AssistantMessage) and msg.tool_calls:
+                # 检查后面是否有足够多的 ToolMessage
+                tool_count = len(msg.tool_calls)
+                following_tools = 0
+                for j in range(i + 1, len(messages)):
+                    if isinstance(messages[j], ToolMessage):
+                        following_tools += 1
+                    elif isinstance(messages[j], AssistantMessage):
+                        break  # 遇到下一个 AssistantMessage，停止计数
+                if following_tools >= tool_count:
+                    result.append(msg)
+                # else: 跳过孤儿的 tool_calls
+            else:
+                result.append(msg)
+        return result
+
     # ── 构建 LLM 消息列表 ──────────────────────────────────────────
 
     def build_messages(self, user_message: Optional[str] = None) -> list[Message]:
@@ -258,8 +281,9 @@ class ConversationMemory:
             context = self._world_state.to_context_text()
             messages.append(UserMessage(content=f"[世界状态]\n{context}"))
 
-        # 历史消息
-        messages.extend(self._messages)
+        # 历史消息 (过滤掉不完整的 tool_calls 序列——工具执行崩溃留下的孤儿消息)
+        clean_history = self._strip_orphaned_tool_calls(self._messages)
+        messages.extend(clean_history)
 
         # 当前用户输入
         if user_message:

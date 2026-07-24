@@ -18,7 +18,7 @@
     client = OpenAICompatClient(
         api_key="sk-...",
         base_url="https://api.deepseek.com/v1",
-        model="deepseek-v4",
+        model="deepseek-v4-flash",
     )
 
     # 普通聊天
@@ -83,6 +83,9 @@ STRIP_REASONING_BY_DEFAULT = True
 
 # DeepSeek 模型的特殊处理
 DEEPSEEK_REASONING_MODELS = {
+    # V4 系列 (支持 thinking 模式的所有模型)
+    "deepseek-v4-flash", "deepseek-v4-pro",
+    # 旧版 (已弃用 2026-07-24)
     "deepseek-v4", "deepseek-v3", "deepseek-r1", "deepseek-reasoner",
 }
 
@@ -126,6 +129,7 @@ class OpenAICompatClient(AsyncChatModel):
         circuit_breaker_recovery: float = 60.0,
         # 行为配置
         strip_reasoning: bool = True,
+        enable_thinking: bool = True,
         log_dir: str = "data",
     ):
         """
@@ -141,6 +145,7 @@ class OpenAICompatClient(AsyncChatModel):
             circuit_breaker_threshold: 断路器熔断阈值 (连续失败次数)
             circuit_breaker_recovery: 断路器恢复超时 (秒)
             strip_reasoning: 是否从非流式响应中剥离 reasoning_content
+            enable_thinking: 是否启用 LLM 思考模式 (DeepSeek thinking / Qwen3 enable_thinking)
             log_dir: 日志/数据目录
         """
         # API 配置
@@ -157,6 +162,7 @@ class OpenAICompatClient(AsyncChatModel):
 
         # 行为配置
         self._strip_reasoning = strip_reasoning
+        self._enable_thinking = enable_thinking
         self._log_dir = log_dir
 
         # 重试配置
@@ -220,18 +226,32 @@ class OpenAICompatClient(AsyncChatModel):
         """
         获取特定模型的额外参数
 
-        DeepSeek v4: 不需要特殊参数 (reasoning 默认开启)
-        Qwen3: 需要 enable_thinking=False 来禁用冗长的思考过程
+        DeepSeek v4: 通过 thinking 参数控制思考模式
+        Qwen3: 通过 enable_thinking 参数控制思考模式
         """
         model_lower = self._model.lower()
 
-        # Qwen3 本地部署 (localhost) 使用 chat_template_kwargs
-        if any(name in model_lower for name in QWEN3_MODELS):
-            base_lower = self._base_url.lower()
-            if "localhost" in base_lower or "127.0.0.1" in base_lower:
-                return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
-            # Qwen3 云端 API 使用顶层参数
-            return {"extra_body": {"enable_thinking": False}}
+        # 如果 thinking 被禁用，发送对应的 API 参数
+        if not self._enable_thinking:
+            # DeepSeek 模型: 使用 thinking 参数禁用思考
+            if any(name in model_lower for name in DEEPSEEK_REASONING_MODELS):
+                return {"extra_body": {"thinking": {"type": "disabled"}}}
+
+            # Qwen3 本地部署 (localhost) 使用 chat_template_kwargs
+            if any(name in model_lower for name in QWEN3_MODELS):
+                base_lower = self._base_url.lower()
+                if "localhost" in base_lower or "127.0.0.1" in base_lower:
+                    return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
+                # Qwen3 云端 API
+                return {"extra_body": {"enable_thinking": False}}
+
+        # 即使 enable_thinking=True, Qwen3 本地部署默认也需要禁用思考
+        # (Qwen3 本地版思考过程冗长且不必要)
+        if self._enable_thinking:
+            if any(name in model_lower for name in QWEN3_MODELS):
+                base_lower = self._base_url.lower()
+                if "localhost" in base_lower or "127.0.0.1" in base_lower:
+                    return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
 
         return {}
 
@@ -261,8 +281,8 @@ class OpenAICompatClient(AsyncChatModel):
         # 模型特殊参数
         params.update(self._get_extra_params())
 
-        # DeepSeek reasoning 流式配置
-        if stream and self._capabilities.supports_reasoning:
+        # DeepSeek reasoning 流式配置 (仅在 thinking 启用时请求 reasoning)
+        if stream and self._enable_thinking and self._capabilities.supports_reasoning:
             params["stream_options"] = {"include_reasoning": True}
 
         return params

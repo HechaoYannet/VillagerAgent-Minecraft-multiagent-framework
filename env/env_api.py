@@ -3,12 +3,16 @@ import time
 import asyncio
 from javascript import require, On
 import sys
-import io
 import os
 import json
 from collections import deque
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf8')
+try:
+    # Keep UTF-8 output while enabling line buffering for real-time logs.
+    sys.stdout.reconfigure(encoding='utf-8', line_buffering=True, write_through=True)
+except AttributeError:
+    # Fallback for older Python versions without reconfigure.
+    pass
 
 env_infos = None
 update_time = 0
@@ -790,10 +794,10 @@ def is_entity_or_item(name):
     # 已经确定是合法的名字但是不知道是实体还是方块
     with open('data/mcData.json', 'r', encoding='utf-8') as f:
         mc_data_json = json.load(f)
-    for item in mc_data_json['entities']:
+    for item in mc_data_json.get('entities', []):
         if name == item[0]:
             return 'entity'
-    for item in mc_data_json['items']:
+    for item in mc_data_json.get('items', []):
         if name == item[0]:
             return 'item'
 
@@ -1621,18 +1625,26 @@ def dig_at(bot, pathfinder, Vec3, pos):
         try:
             target = bot.blockAt(Vec3(pos[0], pos[1], pos[2]))
             tag, msg = dig_check(bot, target.name)
-            if target and tag:
-                bot.dig(target)
-                return f" dig at {pos}", True
-            elif not tag:
-                # bot.chat(f'cannot dig because {msg}')
+            if not tag:
                 return f"cannot dig {target.name} at position{pos}, because {msg}", False
-            elif target:
-                # bot.chat(f'can not dig')
-                return f"cannot dig {target.name} at position{pos}", False
-            else:
-                # bot.chat(f'no target')
-                return f"cannot dig, no block at {pos}", False
+
+            # 执行挖掘 + 等待完成
+            bot.dig(target)
+            time.sleep(0.5)  # 等待 JS Promise 开始执行
+
+            # 轮询确认方块被破坏 (最多等 10 秒)
+            wait_start = time.time()
+            while time.time() - wait_start < 10:
+                check_block = bot.blockAt(Vec3(pos[0], pos[1], pos[2]))
+                if check_block and check_block.get("name", "") == "air":
+                    return f"dug at {pos}", True
+                time.sleep(0.3)
+
+            # 超时 — 最后再检查一次
+            final_check = bot.blockAt(Vec3(pos[0], pos[1], pos[2]))
+            if final_check and final_check.get("name", "") == "air":
+                return f"dug at {pos}", True
+            return f"dig timed out: block at {pos} is still {final_check.get('name', 'unknown') if final_check else 'unknown'}", False
 
         except Exception as e:
             if len(str(e)) < 200:
@@ -2492,7 +2504,7 @@ def findSimilarName(name):
         return name, f"find {name}"
     
     # 遍历实体和物品
-    for item in mc_data_json['entities'] + mc_data_json['items']:
+    for item in mc_data_json.get('entities', []) + mc_data_json.get('items', []):
         try:
             item_name = item[0]
             item_parts = item_name.split('_')
