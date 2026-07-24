@@ -10,7 +10,10 @@
     "mineflayer-collectblock": "^1.6.0",
     "mineflayer-pvp": "^1.3.2",
     "minecrafthawkeye": "^1.3.9",
-    "prismarine-viewer": "^1.33.0",
     "vec3": "^0.2.0"
+  },
+  "optionalDependencies": {
+    "prismarine-viewer": "^1.33.0",
+    "socks5-client": "^1.2.8"
   }
 }

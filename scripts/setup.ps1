@@ -131,8 +131,13 @@ if ($Full) {
 # ═══════════════════════════════════════════════════════════════════
 # 5. 安装 Node.js 依赖 (JSPyBridge 桥接)
 # ═══════════════════════════════════════════════════════════════════
+# package.json 源文件在 js_bridge/, 复制到根目录后安装
+# (JSPyBridge require() 从工作目录解析 node_modules)
 if ($NodeCmd) {
     Write-Host "[INFO] 安装 Node.js 依赖 (Mineflayer)..." -ForegroundColor Cyan
+    # 复制 js_bridge/package.json 到根目录
+    Copy-Item "js_bridge/package.json" "package.json" -Force
+    # prismarine-viewer / socks5-client 是 optionalDependencies, 编译失败不会阻塞
     npm install --production --silent 2>$null
     if ($LASTEXITCODE -ne 0) {
         npm install --production

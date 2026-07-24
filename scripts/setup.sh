@@ -133,8 +133,13 @@ esac
 # ═══════════════════════════════════════════════════════════════════
 # 5. 安装 Node.js 依赖 (JSPyBridge 桥接)
 # ═══════════════════════════════════════════════════════════════════
+# package.json 源文件在 js_bridge/, 复制到根目录后安装
+# (JSPyBridge require() 从工作目录解析 node_modules)
 if [ -n "$NODE" ]; then
     info "安装 Node.js 依赖 (Mineflayer)..."
+    # 复制 js_bridge/package.json 到根目录
+    cp js_bridge/package.json package.json
+    # prismarine-viewer / socks5-client 是 optionalDependencies, 编译失败不会阻塞
     npm install --production --silent 2>/dev/null || npm install --production
     ok "Node.js 依赖已安装"
 fi
