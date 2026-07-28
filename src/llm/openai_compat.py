@@ -12,13 +12,13 @@
 (DeepSeek, Qwen, GPT, vLLM, local proxies) 均可使用。
 
 用法：
-    from model.openai_client import OpenAICompatClient
-    from model.llm_base import SystemMessage, UserMessage
+    from src.llm.openai_compat import OpenAICompatClient
+    from src.llm.base import SystemMessage, UserMessage
 
     client = OpenAICompatClient(
         api_key="sk-...",
         base_url="https://api.deepseek.com/v1",
-        model="deepseek-v4-flash",
+        model="deepseek-chat",
     )
 
     # 普通聊天
@@ -81,12 +81,9 @@ logger = logging.getLogger(__name__)
 # 默认不发送 reasoning_content 给下一轮对话（节省 token）
 STRIP_REASONING_BY_DEFAULT = True
 
-# DeepSeek 模型的特殊处理
+# DeepSeek 推理模型 (R1 系列, 有 reasoning_content)
 DEEPSEEK_REASONING_MODELS = {
-    # V4 系列 (支持 thinking 模式的所有模型)
-    "deepseek-v4-flash", "deepseek-v4-pro",
-    # 旧版 (已弃用 2026-07-24)
-    "deepseek-v4", "deepseek-v3", "deepseek-r1", "deepseek-reasoner",
+    "deepseek-reasoner", "deepseek-r1",
 }
 
 # Qwen3 模型需要特殊参数来禁用 thinking（非思考模式）
@@ -117,7 +114,7 @@ class OpenAICompatClient(AsyncChatModel):
         self,
         api_key: str = "",
         base_url: str = "https://api.openai.com/v1",
-        model: str = "gpt-4o-mini",
+        model: str = "",
         api_key_list: Optional[list[str]] = None,
         role_name: str = "",
         # 重试配置
@@ -130,7 +127,7 @@ class OpenAICompatClient(AsyncChatModel):
         # 行为配置
         strip_reasoning: bool = True,
         enable_thinking: bool = True,
-        log_dir: str = "data",
+        log_dir: str = "logs/llm",
     ):
         """
         Args:
@@ -152,12 +149,16 @@ class OpenAICompatClient(AsyncChatModel):
         if api_key == "" or api_key is None:
             api_key = os.environ.get("OPENAI_API_KEY", "")
         if api_key == "":
-            raise ValueError("请提供 API Key (api_key 参数或 OPENAI_API_KEY 环境变量)")
+            raise RuntimeError(
+                "未找到 LLM API Key。\n"
+                "  解决: 复制 config/secrets.template.yaml 为 config/secrets.yaml 并填入 llm.api_key,\n"
+                "  或设置环境变量 LLM_API_KEY / OPENAI_API_KEY。"
+            )
 
         self._api_key = api_key
         self._api_key_list = list(set(api_key_list)) if api_key_list else [api_key]
         self._base_url = base_url.rstrip("/")
-        self._model = model
+        self._model = model or os.environ.get("LLM_MODEL") or "deepseek-chat"
         self.role_name = role_name
 
         # 行为配置

@@ -19,19 +19,12 @@ LABEL description="Minecraft AI Companion System"
 # ═══════════════════════════════════════════════════════════════════
 # - Node.js 22 LTS: JSPyBridge + Mineflayer 桥接
 # - build-essential python3-dev: JSPyBridge (javascript 包) 编译
-# - libcairo2/libpango/libjpeg/libgif/librsvg: prismarine-viewer (canvas)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gnupg \
     git \
     build-essential \
     python3-dev \
-    libcairo2-dev \
-    libpango1.0-dev \
-    libjpeg-dev \
-    libgif-dev \
-    librsvg2-dev \
-    libpixman-1-dev \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && apt-get clean \
@@ -42,22 +35,15 @@ WORKDIR /app
 # ═══════════════════════════════════════════════════════════════════
 # Python 依赖 — 先复制 requirements 以利用 Docker 层缓存
 # ═══════════════════════════════════════════════════════════════════
-#
-# 注意: 原 requirements.txt 缺失以下运行时依赖 (env/minecraft_server.py 需要):
-#   flask, waitress, names
-# 并包含无用依赖:
-#   retry>=0.9.2 — 整个代码库无任何 import retry
-#
-# 本 Dockerfile 使用修正后的 docker/requirements-docker.txt
-COPY docker/requirements-docker.txt /tmp/requirements-docker.txt
-RUN pip install --no-cache-dir -r /tmp/requirements-docker.txt
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # ═══════════════════════════════════════════════════════════════════
 # Node.js 依赖 — Mineflayer 桥接 (JSPyBridge)
 # ═══════════════════════════════════════════════════════════════════
 # 重要: JSPyBridge require() 从工作目录 (/app) 解析 node_modules,
 #       因此必须在 /app 下安装, 不能只装在 js_bridge/ 子目录。
-# prismarine-viewer 的 canvas 需要 native 编译 (已安装系统库)
+# prismarine-viewer / socks5-client 是 optionalDependencies, 编译失败不阻塞
 COPY js_bridge/package.json /tmp/package.json
 RUN cd /app && cp /tmp/package.json package.json && npm install --production
 

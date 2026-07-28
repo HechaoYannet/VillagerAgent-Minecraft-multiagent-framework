@@ -1,82 +1,65 @@
 # ===========================================
 # VillagerAgent 默认配置
+# 只保留代码实际读取的键 (读取位置见注释)
 # ===========================================
 
 # Minecraft 服务器连接
+# 读取: main.py:36,145 / src/core/controller.py:431
 minecraft:
   host: "localhost"
   port: 25565
-  version: "1.21.1"
-  auth: "offline"  # offline | microsoft
 
 # Agent 配置
+# 读取: src/core/controller.py:432,438-439
 agents:
   default_count: 1
   default_name_prefix: "伙伴"
-  op_on_join: true
-  idle_behavior: "wander"  # wander | stay | follow
-  omniscient_vision: false
+  # --- Token 优化配置 (以下为硬编码默认值, 可在 YAML 中覆盖) ---
+  max_tool_steps: 8         # 单任务最大工具调用步数 (默认 8, 鼓励一次发多个独立工具)
+  max_history: 24           # 对话历史条数上限 (默认 24, 原 100)
+  llm_max_tokens: 1024      # 决策循环 max_tokens (默认 1024, 原 4096)
+  planning_enabled: true    # 非闲聊任务是否预规划
+  proactive_llm: false      # 主动行为是否走 LLM (false=规则模板, 省 token)
+  proactive_cooldown: 300   # 同类主动行为冷却秒数
 
 # LLM 配置
+# 读取: src/llm/factory.py:230-244 (model/api_base/api_key/enable_thinking)
+# api_key 请放在 config/secrets.yaml, 或设置环境变量 LLM_API_KEY / OPENAI_API_KEY
 llm:
-  provider: "deepseek"  # deepseek | openai | gemini
-  model: "deepseek-v4-flash"  # deepseek-v4-flash (轻量) | deepseek-v4-pro (旗舰)
+  model: "deepseek-v4-flash"  # deepseek-chat (V3) | deepseek-reasoner (R1)
   api_base: "https://api.deepseek.com/v1"
-  max_tokens: 4096
-  temperature: 0.7
-  stream: true
-  enable_thinking: false  # deepseek-reasoner 才支持思考 tokens
-
-# 记忆
-memory:
-  short_term_size: 100
-  long_term_enabled: true
-  vector_db: "chromadb"  # chromadb | faiss
-  world_config_dir: "data/world"
+  enable_thinking: false  # 仅 deepseek-reasoner 支持思考 tokens
 
 # Web 管理后台
+# 读取: main.py:118,124-125
 web:
   enabled: true
   host: "0.0.0.0"
   port: 8080
-  username: "admin"
-  # password 在 secrets.yaml 中设置
 
 # 日志
+# 读取: main.py:60-61
 logging:
   level: "INFO"  # DEBUG | INFO | WARNING | ERROR
   structured: true
-  retention_days: 30
-  llm_debug: false
-
-# 热重载
-hot_reload:
-  enabled: false
-  github_repo: ""
-  branch: "main"
-  check_interval_seconds: 300
-
-# Token 配额
-quota:
-  enabled: true
-  daily_limit: 1000000
-  hourly_limit: 100000
-  warn_threshold: 0.8
-
-# 语言
-language: "zh-CN"
 
 # Minecraft Bridge 模式
-# real: 连接真实 Minecraft 服务器 (需要 Flask 服务器运行在 minecraft_server.py)
-# mock: 模拟 Minecraft 世界 (测试/开发)
+# 读取: main.py:102,154
+# real:     连接真实 Minecraft 服务器 (需先启动 env/minecraft_server.py Flask 桥)
+# mock:     模拟 Minecraft 世界 (测试/开发, 无需 MC 服务器)
 # disabled: 纯 LLM 模式 (无 Minecraft 交互)
+# flask_host/flask_port 读取: src/core/controller.py:413-416
 bridge:
   mode: "real"
+  flask_host: "localhost"  # 默认与 minecraft.host 一致可省略
   flask_port: 5000
-  world_poll_interval: 5.0
-  chat_poll_interval: 1.0
 
-# EasyAuth 自动登录 (如果 Minecraft 服务器安装了 EasyAuth 模组)
+# EasyAuth 自动登录 (Minecraft 服务器模组)
+# 读取: env/minecraft_server.py:1436-1437
+# 密码推荐放在 config/secrets.yaml 中:
+#   easyauth:
+#     password: "你的密码"
+# 环境变量 EASYAUTH_PASSWORD / EASYAUTH_FORCE_LOGIN 会覆盖此配置
 easyauth:
-  enabled: false
-  force_login: true  # true: globalPassword 模式 (disableRegister); false: 自动检测
+  password: ""
+  force_login: false

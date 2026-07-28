@@ -17,7 +17,9 @@
     EASYAUTH_FORCE_LOGIN     — true: globalPassword 模式; false: 自动检测 (默认)
     MINECRAFT_HOST           — MC 服务器地址 (默认 localhost)
     MINECRAFT_PORT           — MC 服务器端口 (默认 25565)
-    FLASK_BOT_PORT           — Flask 服务器端口 (默认 5000)
+    FLASK_BOT_HOST           — Flask 桥地址 (默认 localhost)
+    FLASK_BOT_PORT           — Flask 桥端口 (默认 5000)
+    TEST_LLM_MODEL           — 装配测试用模型名 (默认 deepseek-chat)
 
 用法:
     python tests/test_e2e.py              # 自动检测服务器可用性
@@ -27,6 +29,21 @@
 
 import sys, os, asyncio, argparse, json, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# ── 测试目标配置 (可用环境变量覆盖) ──
+MC_HOST = os.environ.get("MINECRAFT_HOST", "localhost")
+MC_PORT = int(os.environ.get("MINECRAFT_PORT", "25565"))
+FLASK_HOST = os.environ.get("FLASK_BOT_HOST", "localhost")
+FLASK_PORT = int(os.environ.get("FLASK_BOT_PORT", "5000"))
+FLASK_BASE = f"http://{FLASK_HOST}:{FLASK_PORT}"
+
+# Windows GBK 控制台兼容: 强制 UTF-8 输出
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 PASS = 0; FAIL = 0; SKIP = 0
 
@@ -60,22 +77,30 @@ async def check_server(url, timeout=3):
 async def test_connectivity(mode):
     print("\n1. Server Connectivity")
 
-    mc_ok = await check_server("http://localhost:5000/post_ping")
-    check("Flask Bot Server (port 5000)", mc_ok, "未检测到 Flask 服务器 — 启动 env/minecraft_server.py")
+    flask_ok = await check_server(f"{FLASK_BASE}/post_ping")
 
     # Check if MC server port is open (basic TCP check)
     try:
         import socket
         s = socket.socket()
         s.settimeout(3)
-        s.connect(("localhost", 25565))
+        s.connect((MC_HOST, MC_PORT))
         s.close()
         mc_port_ok = True
     except Exception:
         mc_port_ok = False
-    check("Minecraft Server (port 25565)", mc_port_ok, "未检测到 Minecraft 服务器")
 
-    return mc_ok and mc_port_ok
+    if mode == "mock":
+        # MOCK 模式不依赖真实服务器, 未启动记为跳过而非失败
+        check(f"Flask Bot Server ({FLASK_HOST}:{FLASK_PORT})", None if not flask_ok else True,
+              "MOCK 模式跳过 (未启动)")
+        check(f"Minecraft Server ({MC_HOST}:{MC_PORT})", None if not mc_port_ok else True,
+              "MOCK 模式跳过 (未启动)")
+    else:
+        check(f"Flask Bot Server ({FLASK_HOST}:{FLASK_PORT})", flask_ok, "未检测到 Flask 服务器 — 启动 env/minecraft_server.py")
+        check(f"Minecraft Server ({MC_HOST}:{MC_PORT})", mc_port_ok, "未检测到 Minecraft 服务器")
+
+    return flask_ok and mc_port_ok
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -86,13 +111,13 @@ async def test_bridge_real():
     from src.core.event_bus import EventBus
     from src.core.bridge import MinecraftBridge, BridgeMode
 
-    if not await check_server("http://localhost:5000/post_ping"):
+    if not await check_server(f"{FLASK_BASE}/post_ping"):
         check("Bridge REAL — world state", None, "Flask 服务器不可达")
         check("Bridge REAL — ping", None, "")
         return
 
     bus = EventBus()
-    bridge = MinecraftBridge(event_bus=bus, mode=BridgeMode.REAL, base_url="http://localhost:5000")
+    bridge = MinecraftBridge(event_bus=bus, mode=BridgeMode.REAL, base_url=FLASK_BASE)
 
     try:
         await bridge.start()
@@ -129,7 +154,7 @@ async def test_flask_endpoints():
     print("\n3. Flask API 端点")
     import httpx
 
-    base = "http://localhost:5000"
+    base = FLASK_BASE
 
     try:
         async with httpx.AsyncClient(timeout=5) as c:
@@ -207,12 +232,12 @@ async def test_bot_actions():
     from src.core.event_bus import EventBus
     from src.core.bridge import MinecraftBridge, BridgeMode
 
-    if not await check_server("http://localhost:5000/post_ping"):
+    if not await check_server(f"{FLASK_BASE}/post_ping"):
         check("Bot actions", None, "Flask 服务器不可达")
         return
 
     bus = EventBus()
-    bridge = MinecraftBridge(event_bus=bus, mode=BridgeMode.REAL, base_url="http://localhost:5000")
+    bridge = MinecraftBridge(event_bus=bus, mode=BridgeMode.REAL, base_url=FLASK_BASE)
     await bridge.start()
 
     # Test basic actions
@@ -255,10 +280,11 @@ async def test_controller():
     bridge = MinecraftBridge(event_bus=bus, mode=BridgeMode.MOCK)
     controller = AgentController(event_bus=bus, bridge=bridge)
 
-    # Use valid model name to avoid factory fallback error
+    # 测试用模型名 (不发起真实调用, 仅验证装配); 可用 TEST_LLM_MODEL 覆盖
+    test_model = os.environ.get("TEST_LLM_MODEL", "deepseek-chat")
     config = AgentConfig(
         name="TestBot",
-        llm={"api_model": "gpt-4o-mini", "api_key": "test-key"},
+        llm={"api_model": test_model, "api_key": "test-key"},
         personality={"性格": "热情"},
     )
     controller.configure_agent(config)
@@ -276,7 +302,6 @@ async def test_controller():
         check("Controller — interaction", agent.interaction is not None)
         check("Controller — planner", agent.planner is not None)
         check("Controller — structured_log", hasattr(agent, 'structured_log'))
-        check("Controller — token_quota", hasattr(agent, 'token_quota'))
 
         await controller.stop_agent("TestBot")
         check("Controller — agent stopped", "TestBot" not in controller._agents)
@@ -300,14 +325,14 @@ async def test_easyauth():
 
     check("EasyAuth — EASYAUTH_PASSWORD 已设置",
           bool(easyauth_password) or None,  # SKIP if not set (optional config)
-          "设置 export EASYAUTH_PASSWORD='your_password' 以启用自动登录")
+          "设置 EASYAUTH_PASSWORD 环境变量, 或在 config/default.yaml / secrets.yaml 中配置 easyauth.password")
     check("EasyAuth — EASYAUTH_FORCE_LOGIN 模式",
           True, f"当前: {'globalPassword /login 模式' if easyauth_force_login else '自动检测 /login 或 /register'}")
 
     if not easyauth_password:
-        print("     💡 提示: 设置 EASYAUTH_PASSWORD 环境变量以启用 EasyAuth 自动登录")
-        print("        globalPassword 模式: export EASYAUTH_PASSWORD='密码' EASYAUTH_FORCE_LOGIN=true")
-        print("        注册模式: export EASYAUTH_PASSWORD='密码'")
+        print("     💡 提示: 设置环境变量或 YAML 配置以启用 EasyAuth 自动登录")
+        print("        环境变量: export EASYAUTH_PASSWORD='密码' [EASYAUTH_FORCE_LOGIN=true]")
+        print("        config/secrets.yaml: easyauth.password: 你的密码")
 
     # Check MC server EasyAuth config
     mc_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -336,12 +361,12 @@ async def test_full_pipeline_real():
     from src.core.bridge import MinecraftBridge, BridgeMode
     from src.core.tools import ToolRegistry, MINECRAFT_TOOL_DEFINITIONS
 
-    if not await check_server("http://localhost:5000/post_ping"):
+    if not await check_server(f"{FLASK_BASE}/post_ping"):
         check("集成管道", None, "Flask 服务器不可达 — 启动 env/minecraft_server.py")
         return
 
     bus = EventBus(history_size=500)
-    bridge = MinecraftBridge(event_bus=bus, mode=BridgeMode.REAL, base_url="http://localhost:5000")
+    bridge = MinecraftBridge(event_bus=bus, mode=BridgeMode.REAL, base_url=FLASK_BASE)
     await bridge.start()
     await bus.start()
 
@@ -402,7 +427,7 @@ async def main():
     print("=" * 60)
 
     # Auto-detect server
-    flask_ok = await check_server("http://localhost:5000/post_ping")
+    flask_ok = await check_server(f"{FLASK_BASE}/post_ping")
     use_real = args.real or (flask_ok and not args.mock)
     if args.mock:
         use_real = False
@@ -410,7 +435,7 @@ async def main():
     print(f"\n模式: {'REAL (连接 Minecraft)' if use_real else 'MOCK (离线模拟)'}")
     print(f"Flask 服务器: {'✅ 运行中' if flask_ok else '❌ 未启动'}")
     if not flask_ok:
-        print("   💡 启动方法: python env/minecraft_server.py --port 25565 --local_port 5000")
+        print(f"   💡 启动方法: python env/minecraft_server.py --port {MC_PORT} --local_port {FLASK_PORT}")
     if not flask_ok and use_real:
         print("   ⚠️  REAL 模式需要 Flask 服务器运行，将仅运行 MOCK 测试")
         use_real = False

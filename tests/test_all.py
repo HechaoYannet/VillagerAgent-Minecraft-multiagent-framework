@@ -1,26 +1,32 @@
 """
-全量集成测试 — Phase 0-8
+全量集成测试
 
-测试所有核心模块的正确性:
+测试核心模块的正确性:
 - EventBus: 发布/订阅/优先级/历史/内存泄漏
 - ConversationMemory: 构建消息/截断/工具描述注入
 - MinecraftBridge: MOCK模式/工具执行
 - WorldConfig: 加载/保存/位置/事件
 - LongTermMemory: 事件/位置/玩家档案
-- TokenQuota: 配额检查/警告/耗尽
-- ToolOptimizer: 工具推荐/合成链/批量
 - EmotionEngine: 情绪触发/提示词生成
-- ToolRegistry: 29工具OpenAI Schema
+- ToolRegistry: 17工具 OpenAI Schema (与 Flask /api/action 一一对应)
+- TaskPlanner: LLM 规划接口存在性
 - main.py: 入口正确性
 """
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Windows GBK 控制台兼容: 强制 UTF-8 输出
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import asyncio
 import tempfile
 
-import shutil
 import inspect
 
 PASS = 0
@@ -161,44 +167,24 @@ async def test_ltm():
 
 
 # ═══════════════════════════════════════════════════════════════
-# 6. TokenQuota
+# 6. ToolRegistry (17 个工具, 与 Flask /api/action 一一对应)
 # ═══════════════════════════════════════════════════════════════
-async def test_quota():
-    print("\n6. TokenQuota")
-    from src.core.token_quota import TokenQuotaManager
+FLASK_ROUTE_MAP_TOOLS = {
+    'moveTo', 'followPlayer', 'mineBlock', 'placeBlock', 'getInventory',
+    'getWorldInfo', 'scanNearbyEntities', 'findBlock', 'equipItem',
+    'attackEntity', 'openChest', 'interactBlock', 'craftItem', 'smeltItem',
+    'finalAnswer', 'wait', 'sendChat',
+}
 
-    mgr = TokenQuotaManager(data_dir="data/_test_q")
-    # Set limits high enough so both daily and hourly allow 42000+1000
-    mgr.set_limits("Test", daily=50000, hourly=50000)
-    await mgr.record_usage("Test", 42000)  # 84% of daily → triggers 80% warning
-    ok, warn = await mgr.check("Test", 1000)
-    check("quota warning", ok and "配额提醒" in warn)
-
-    mgr2 = TokenQuotaManager(data_dir="data/_test_q2")
-    ok2, fb = await mgr2.check("Bob", 999999999)
-    check("quota exhaustion", not ok2)
-
-    shutil.rmtree("data/_test_q", ignore_errors=True)
-    shutil.rmtree("data/_test_q2", ignore_errors=True)
-
-
-# ═══════════════════════════════════════════════════════════════
-# 7. ToolOptimizer + Registry
-# ═══════════════════════════════════════════════════════════════
 def test_tools():
-    print("\n7. Tools")
-    from src.core.tool_optimizer import ToolOptimizer
+    print("\n6. Tools")
     from src.core.tools import MINECRAFT_TOOL_DEFINITIONS, ToolRegistry
 
-    check("29 tools", len(MINECRAFT_TOOL_DEFINITIONS) == 29,
+    names = {t.name for t in MINECRAFT_TOOL_DEFINITIONS}
+    check("17 tools", len(MINECRAFT_TOOL_DEFINITIONS) == 17,
           f"got {len(MINECRAFT_TOOL_DEFINITIONS)}")
-
-    opt = ToolOptimizer()
-    check("tool hints", opt.suggest_tool("diamond_ore") == "pickaxe")
-    check("batchable", opt.is_batchable("mineBlock") and not opt.is_batchable("sendChat"))
-
-    chain = opt.resolve_crafting_chain("stone_pickaxe")
-    check("crafting chain", chain is not None and len(chain) >= 2)
+    check("tools match flask route_map", names == FLASK_ROUTE_MAP_TOOLS,
+          f"diff: {names ^ FLASK_ROUTE_MAP_TOOLS}")
 
     # OpenAI schemas
     registry = ToolRegistry()
@@ -206,14 +192,14 @@ def test_tools():
         registry.register(td.name, td.description, list(td.parameters),
                          category="test", handler=lambda **k: {"status": True})
     schemas = [t.to_openai_schema() for t in registry.get_openai_tools()]
-    check("openai schemas", len(schemas) == 29 and all("function" in s for s in schemas))
+    check("openai schemas", len(schemas) == 17 and all("function" in s for s in schemas))
 
 
 # ═══════════════════════════════════════════════════════════════
-# 8. EmotionEngine
+# 7. EmotionEngine
 # ═══════════════════════════════════════════════════════════════
 def test_emotions():
-    print("\n8. EmotionEngine")
+    print("\n7. EmotionEngine")
     from src.prompts.emotions import EmotionEngine, Emotion
 
     engine = EmotionEngine(personality_type="热情")
@@ -229,26 +215,24 @@ def test_emotions():
 
 
 # ═══════════════════════════════════════════════════════════════
-# 9. Planning
+# 8. Planning
 # ═══════════════════════════════════════════════════════════════
 def test_planning():
-    print("\n9. Planning")
+    print("\n8. Planning")
     from src.core.planning import TaskPlanner
 
-    planner = TaskPlanner.__new__(TaskPlanner)
-    plan = planner.quick_plan("制作钻石镐")
-    check("quick_plan steps", len(plan.steps) >= 3)
-    check("quick_plan confidence", plan.confidence > 0)
-
-    plan2 = planner.quick_plan("挖矿")
-    check("template match", len(plan2.steps) >= 3)
+    # quick_plan/update_after_step 等模板方法已在清理中移除,
+    # 只验证 LLM 规划接口存在
+    check("plan method", callable(getattr(TaskPlanner, "plan", None)))
+    check("analyze_environment method", callable(getattr(TaskPlanner, "analyze_environment", None)))
+    check("planning_enabled prop", isinstance(TaskPlanner.planning_enabled, property))
 
 
 # ═══════════════════════════════════════════════════════════════
-# 10. main.py
+# 9. main.py
 # ═══════════════════════════════════════════════════════════════
 def test_main():
-    print("\n10. main.py")
+    print("\n9. main.py")
     import main
     check("run_agent exists", hasattr(main, "run_agent"))
     check("run_web exists", hasattr(main, "run_web"))
@@ -259,10 +243,10 @@ def test_main():
 
 
 # ═══════════════════════════════════════════════════════════════
-# 11. All imports
+# 10. All imports
 # ═══════════════════════════════════════════════════════════════
 def test_imports():
-    print("\n11. All imports")
+    print("\n10. All imports")
     modules = [
         ("src.llm.base", "LLM base"),
         ("src.llm.retry", "Retry"),
@@ -279,10 +263,7 @@ def test_imports():
         ("src.core.long_term_memory", "LTM"),
         ("src.core.planning", "Planning"),
         ("src.core.interaction", "Interaction"),
-        ("src.core.tool_optimizer", "Optimizer"),
         ("src.core.structured_logging", "StructuredLog"),
-        ("src.core.token_quota", "Quota"),
-        ("src.core.hot_reload", "HotReload"),
         ("src.core", "Core package"),
         ("src.prompts.system_prompts", "Prompts"),
         ("src.prompts.emotions", "Emotions"),
@@ -290,13 +271,6 @@ def test_imports():
         ("src.prompts", "Prompts package"),
         ("src.utils.serialize", "Serialize"),
         ("src.web.app", "Web app"),
-        ("model.llm_base", "model shim"),
-        ("model.openai_client", "model client shim"),
-        ("model.openai_models", "model old"),
-        ("model.init_model", "model factory"),
-        ("model", "model package"),
-        ("pipeline.tool_registry", "pipeline tools"),
-        ("pipeline.prompts_zh", "pipeline prompts"),
         ("main", "main entry"),
     ]
     for mod, desc in modules:
@@ -320,7 +294,6 @@ async def main():
     await test_bridge()
     await test_world_config()
     await test_ltm()
-    await test_quota()
     test_tools()
     test_emotions()
     test_planning()

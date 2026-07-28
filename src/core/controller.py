@@ -51,7 +51,7 @@ class AgentConfig:
     llm: dict = field(default_factory=dict)  # LLM 配置 (api_model, api_key, ...)
     personality: dict = field(default_factory=dict)
     system_prompt: str = ""
-    max_tool_steps: int = 15
+    max_tool_steps: int = 8
     enabled: bool = True
     # Phase 4
     world_name: str = "default"
@@ -60,6 +60,11 @@ class AgentConfig:
     # Phase 5
     emotion_enabled: bool = True
     proactive_chat: bool = True
+    # Token 优化
+    max_history: int = 24
+    llm_max_tokens: int = 1024
+    proactive_llm: bool = False
+    proactive_cooldown: float = 300.0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -165,7 +170,7 @@ class AgentController:
 
         logger.info("AgentController 已关闭")
 
-    async def run_forever(self, hot_reload_config: dict = None):
+    async def run_forever(self):
         """启动所有已配置的 Agent 并持续运行直到 shutdown"""
         await self.start()
 
@@ -173,20 +178,6 @@ class AgentController:
         for name, config in self._agent_configs.items():
             if config.enabled:
                 await self.start_agent(name, config)
-
-        # Phase 8: 热重载 (如果配置了 GitHub 仓库)
-        if hot_reload_config and hot_reload_config.get("enabled"):
-            from src.core.hot_reload import HotReloader
-            self._hot_reloader = HotReloader(
-                repo_url=hot_reload_config.get("github_repo", ""),
-                branch=hot_reload_config.get("branch", "main"),
-                event_bus=self.event_bus,
-                controller=self,
-            )
-            await self._hot_reloader.start(
-                check_interval=hot_reload_config.get("check_interval_seconds", 300)
-            )
-            logger.info("热重载已启用")
 
         # 等待 shutdown 信号
         await self._shutdown_event.wait()
@@ -268,6 +259,11 @@ class AgentController:
             max_tool_steps=cfg.max_tool_steps,
             world_config=world_config,
             long_term_memory=long_term_memory,
+            # Token 优化参数
+            max_history=cfg.max_history,
+            llm_max_tokens=cfg.llm_max_tokens,
+            proactive_llm=cfg.proactive_llm,
+            proactive_cooldown=cfg.proactive_cooldown,
         )
 
         # Phase 5: 情绪引擎
@@ -308,14 +304,6 @@ class AgentController:
         agent.structured_log = structured_log
         await structured_log.startup()
 
-        # Phase 8: Token 配额 (如果启用)
-        token_quota = None
-        if cfg.llm.get("quota_enabled", True):
-            from src.core.token_quota import TokenQuotaManager
-            token_quota = TokenQuotaManager()
-            await token_quota.load()
-            agent.token_quota = token_quota
-
         # 启动 Agent (创建 asyncio Task)
         task = asyncio.create_task(agent.run(), name=f"agent-{name}")
         self._agents[name] = agent
@@ -337,6 +325,13 @@ class AgentController:
 
         # 停用 Agent
         await agent.stop()
+
+        # 关闭结构化日志
+        if getattr(agent, "structured_log", None):
+            try:
+                await agent.structured_log.shutdown()
+            except Exception as e:
+                logger.warning(f"Agent '{name}' 结构化日志关闭失败: {e}")
 
         # 取消 Task
         task = self._agent_tasks.get(name)
@@ -425,18 +420,30 @@ async def create_controller_from_config(
     from src.core.bridge import BridgeMode
 
     bus = EventBus()
+    bridge_cfg = yaml_config.get("bridge", {})
+    flask_host = bridge_cfg.get("flask_host", yaml_config["minecraft"]["host"])
+    flask_port = bridge_cfg.get("flask_port", 5000)
     bridge = MinecraftBridge(
         event_bus=bus,
         mode=BridgeMode(bridge_mode),
-        base_url=f"http://{yaml_config['minecraft']['host']}:5000",
+        base_url=f"http://{flask_host}:{flask_port}",
         agent_name=yaml_config.get("agents", {}).get("default_name_prefix", "伙伴"),
     )
 
     controller = AgentController(event_bus=bus, bridge=bridge)
 
     # 从配置创建 Agent
-    agent_count = yaml_config.get("agents", {}).get("default_count", 1)
-    name_prefix = yaml_config.get("agents", {}).get("default_name_prefix", "伙伴")
+    agents_cfg = yaml_config.get("agents", {})
+    agent_count = agents_cfg.get("default_count", 1)
+    name_prefix = agents_cfg.get("default_name_prefix", "伙伴")
+
+    # Token 优化参数: 从 YAML 读取, fallback 到 AgentConfig 的默认值
+    max_tool_steps = agents_cfg.get("max_tool_steps", 8)
+    max_history = agents_cfg.get("max_history", 24)
+    llm_max_tokens = agents_cfg.get("llm_max_tokens", 1024)
+    planning_enabled = agents_cfg.get("planning_enabled", True)
+    proactive_llm = agents_cfg.get("proactive_llm", False)
+    proactive_cooldown = agents_cfg.get("proactive_cooldown", 300.0)
 
     for i in range(agent_count):
         name = f"{name_prefix}{i + 1}" if agent_count > 1 else name_prefix
@@ -444,6 +451,12 @@ async def create_controller_from_config(
             name=name,
             llm=yaml_config.get("llm", {}),
             personality={},
+            max_tool_steps=max_tool_steps,
+            max_history=max_history,
+            llm_max_tokens=llm_max_tokens,
+            planning_enabled=planning_enabled,
+            proactive_llm=proactive_llm,
+            proactive_cooldown=proactive_cooldown,
         ))
 
     return controller

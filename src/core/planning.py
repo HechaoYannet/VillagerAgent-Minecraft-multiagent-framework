@@ -352,96 +352,9 @@ class TaskPlanner:
 
     # ── 快速规划 (无需 LLM, 启发式) ──────────────────────────────────
 
-    def quick_plan(self, task_description: str) -> TaskPlan:
-        """
-        快速规划 — 不调用 LLM, 基于模板匹配
-
-        用于简单/常见任务, 节省 token。
-        """
-        steps, prerequisites, resources = self._match_template(task_description)
-
-        return TaskPlan(
-            task_description=task_description,
-            steps=steps or [f"1. 分析任务: {task_description}", "2. 检查环境", "3. 执行操作", "4. 验证结果"],
-            prerequisites=prerequisites,
-            required_resources=resources,
-            estimated_steps=len(steps) if steps else 4,
-            confidence=0.5 if steps else 0.3,
-        )
-
-    def _match_template(self, task: str) -> tuple[list[str], list[str], list[str]]:
-        """简单模板匹配"""
-        task_lower = task.lower()
-
-        # 挖掘类
-        if any(kw in task_lower for kw in ["挖", "dig", "mine", "采集"]):
-            return (
-                ["1. 扫描附近可挖掘方块", "2. 移动到目标位置", "3. 挖掘目标方块", "4. 收集掉落物"],
-                ["需要正确的工具"],
-                ["pickaxe", "shovel"],
-            )
-
-        # 合成类
-        if any(kw in task_lower for kw in ["合成", "制作", "craft", "make"]):
-            return (
-                ["1. 检查库存中是否有原料", "2. 如果没有,采集或寻找原料", "3. 找到或放置工作台", "4. 在工作台合成目标物品"],
-                ["需要工作台"],
-                [],
-            )
-
-        # 建造类
-        if any(kw in task_lower for kw in ["建造", "build", "放置", "place"]):
-            return (
-                ["1. 确认建造方案和位置", "2. 检查所需材料", "3. 准备材料(采集/合成)", "4. 按方案放置方块"],
-                ["需要足够材料"],
-                [],
-            )
-
-        # 探索类
-        if any(kw in task_lower for kw in ["探索", "explore", "找", "find", "寻找"]):
-            return (
-                ["1. 确定搜索目标", "2. 检查已知位置是否有线索", "3. 向目标方向移动", "4. 扫描周围环境"],
-                [],
-                [],
-            )
-
-        return ([], [], [])
-
-    # ── 计划调整 ──────────────────────────────────────────────────────
-
-    def update_after_step(self, step_result: dict):
-        """
-        根据步骤执行结果调整计划
-
-        如果某步失败, 降低置信度并考虑备用计划。
-        """
-        if self._last_plan is None:
-            return
-
-        success = step_result.get("status", False)
-        if not success:
-            # 降低置信度
-            self._last_plan.confidence *= 0.7
-            logger.info(
-                f"计划置信度降至 {self._last_plan.confidence:.0%}"
-                + (f", 考虑备用: {self._last_plan.fallback_plan}"
-                   if self._last_plan.fallback_plan else "")
-            )
-
     # ── 查询 ──────────────────────────────────────────────────────────
-
-    @property
-    def last_plan(self) -> Optional[TaskPlan]:
-        return self._last_plan
 
     @property
     def planning_enabled(self) -> bool:
         return self._planning_enabled
-
-    def disable(self):
-        self._planning_enabled = False
-        logger.info("预规划已禁用")
-
-    def enable(self):
-        self._planning_enabled = True
         logger.info("预规划已启用")

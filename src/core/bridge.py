@@ -230,7 +230,11 @@ class MinecraftBridge:
                 resp = await self._http_client.get(url, **kwargs)
             else:
                 resp = await self._http_client.post(url, json=json_data, **kwargs)
-            return resp.json() if resp.status_code == 200 else (resp.json() if resp.content_type == "application/json" else {"status": False, "message": f"HTTP {resp.status_code}"})
+            if resp.status_code == 200:
+                return resp.json()
+            if "application/json" in resp.headers.get("content-type", ""):
+                return resp.json()
+            return {"status": False, "message": f"HTTP {resp.status_code}"}
         except Exception as e:
             logger.warning(f"HTTP 请求失败 {method} {url}: {e}")
             return {"status": False, "message": str(e)}
@@ -341,14 +345,12 @@ class MinecraftBridge:
         return world.get("my_position")
 
     async def scan_nearby_blocks(self, radius: int = 8, block_name: str = "") -> list[dict]:
-        """扫描附近方块"""
+        """扫描附近方块 (仅 MOCK 模式; REAL 模式由 getWorldInfo 返回的方块列表覆盖)"""
         if self.mode == BridgeMode.MOCK:
             if block_name:
                 return [b for b in MOCK_BLOCKS_NEARBY if block_name in b["name"]]
             return MOCK_BLOCKS_NEARBY
-        return await self._fetch("/api/blocks/nearby", json_data={
-            "radius": radius, "block": block_name,
-        })
+        return []
 
     # ── 工具执行 ─────────────────────────────────────────────────────
 
@@ -413,12 +415,86 @@ class MinecraftBridge:
                 "player": self.agent_name,
                 "text": args.get("message", ""),
             })
+        elif tool_name == "findBlock":
+            return self._mock_find_block(args)
 
         return BridgeResult(
             tool_name=tool_name,
             status=True,
             message=f"[MOCK] 执行 {tool_name}{args} — 成功",
             data={"mock": True},
+        )
+
+    def _mock_find_block(self, args: dict) -> BridgeResult:
+        """模拟 findBlock — 渐进搜索, 过滤 MOCK_BLOCKS_NEARBY, 返回距离 + 可达性"""
+        import math
+        block_name = args.get("block_name", "")
+
+        bot_pos = self._mock_world["my_position"]
+
+        # 按名称过滤
+        found = []
+        for b in MOCK_BLOCKS_NEARBY:
+            if block_name and block_name not in b["name"]:
+                continue
+            bpos = b["position"]
+            dist = math.sqrt(
+                (bpos[0] - bot_pos[0]) ** 2
+                + (bpos[1] - bot_pos[1]) ** 2
+                + (bpos[2] - bot_pos[2]) ** 2
+            )
+            found.append((b, dist))
+
+        # 按距离排序
+        found.sort(key=lambda x: x[1])
+
+        blocks_data = []
+        for i, (b, dist) in enumerate(found):
+            # MOCK: 前 2 个可达, 其余不可达
+            reachable = i < 2
+            blocks_data.append({
+                "x": b["position"][0],
+                "y": b["position"][1],
+                "z": b["position"][2],
+                "distance": round(dist, 1),
+                "reachable": reachable,
+                "pathfinding_msg": "Reached" if reachable else f"Too far ({dist:.0f} blocks)",
+                "checked": True,
+            })
+
+        mock_inventory = {
+            "tool_status": {
+                "has_required_tools": True,
+                "required_tools": [],
+                "held_item": "stone_pickaxe",
+                "missing_tools": [],
+            },
+            "building_blocks": {"dirt": 32, "cobblestone": 16},
+            "has_building_blocks": True,
+            "inventory_summary": "手持: stone_pickaxe; 建筑方块: dirt×32, cobblestone×16",
+            "can_dig_target": True,
+        }
+
+        # 模拟搜索距离 (基于最远找到的方块, 至少 16)
+        max_dist = max((b["distance"] for b in blocks_data), default=0)
+        search_distance = max(16, int(max_dist + 8))
+
+        msg = f"[MOCK] 找到 {len(blocks_data)} 个 {block_name} (搜索范围: {search_distance} 格)"
+        for b in blocks_data[:5]:
+            status = "✓" if b["reachable"] else "✗"
+            msg += f" ({b['x']},{b['y']},{b['z']}) {b['distance']:.0f}格{status}"
+
+        return BridgeResult(
+            tool_name="findBlock",
+            status=len(blocks_data) > 0,
+            message=msg,
+            data={
+                "blocks": blocks_data,
+                "inventory": mock_inventory,
+                "search_distance": search_distance,
+                "total_found": len(blocks_data),
+                "blocks_checked": len(blocks_data),
+            },
         )
 
     def inject_mock_chat(self, player: str, message: str):

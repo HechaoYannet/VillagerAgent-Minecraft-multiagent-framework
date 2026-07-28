@@ -123,7 +123,7 @@ class AsyncBaseAgent:
         bridge: MinecraftBridge,
         personality: Optional[dict] = None,
         system_prompt: str = "",
-        max_tool_steps: int = 15,
+        max_tool_steps: int = 8,
         stream_callback: Optional[StreamCallback] = None,
         log_dir: str = "logs",
         # Phase 4: 持久化记忆与规划
@@ -133,6 +133,11 @@ class AsyncBaseAgent:
         # Phase 5: 情绪与交互
         emotion_engine = None,    # EmotionEngine
         interaction_manager = None,  # InteractionManager
+        # Token 优化
+        max_history: int = 24,
+        llm_max_tokens: int = 1024,
+        proactive_llm: bool = False,
+        proactive_cooldown: float = 300.0,
     ):
         self.name = name
         self.event_bus = event_bus
@@ -141,6 +146,12 @@ class AsyncBaseAgent:
         self.bridge = bridge
         self.max_tool_steps = max_tool_steps
         self.stream_callback = stream_callback
+
+        # Token 优化
+        self.llm_max_tokens = llm_max_tokens
+        self.proactive_llm = proactive_llm
+        self.proactive_cooldown = proactive_cooldown
+        self._proactive_last_fired: dict[str, float] = {}
 
         # Phase 4: 持久化记忆与规划
         self.world_config = world_config
@@ -162,12 +173,8 @@ class AsyncBaseAgent:
         self.memory = ConversationMemory(
             system_prompt=system_prompt,
             personality=personality or {},
+            max_history=max_history,
             agent_name=name,
-        )
-
-        # 将工具描述注入系统提示词
-        self.memory.update_tool_descriptions(
-            self.tools.to_tool_descriptions_text(lang="zh")
         )
 
         # 日志
@@ -347,16 +354,27 @@ class AsyncBaseAgent:
             if msg:
                 await self.bridge.send_chat(msg)
 
-        # 主动行为检测
-        action = self._detect_proactive_action()
-        if action:
-            self._log_state(f"主动行为触发: {action}")
-            await self.event_bus.publish(Event(
-                type=EventType.USER_INPUT,
-                source="timer.proactive",
-                target=self.name,
-                data={"message": action},
-            ))
+        # 主动行为检测 (规则化, 默认不走 LLM 以节省 token)
+        detected = self._detect_proactive_action()
+        if detected:
+            key, msg = detected
+            now = time.monotonic()
+            last = self._proactive_last_fired.get(key, 0.0)
+            if now - last >= self.proactive_cooldown:
+                self._proactive_last_fired[key] = now
+                if self.proactive_llm:
+                    # 保留旧行为: 发布 USER_INPUT 走完整 LLM 决策循环
+                    self._log_state(f"主动行为触发(LLM): {msg}")
+                    await self.event_bus.publish(Event(
+                        type=EventType.USER_INPUT,
+                        source="timer.proactive",
+                        target=self.name,
+                        data={"message": msg},
+                    ))
+                else:
+                    # 规则模板直接回复, 零 LLM 调用
+                    self._log_state(f"主动行为触发(模板): {msg}")
+                    await self.bridge.send_chat(f"[{self.name}] {msg}")
 
     # ── 核心处理循环 ────────────────────────────────────────────────
 
@@ -380,10 +398,10 @@ class AsyncBaseAgent:
         logger.info(f"[{self.name}] 📩 收到: [{player or '玩家'}] {user_message[:100]}")
 
         # Phase 4: 预规划 (LLM 推理任务步骤)
-        # 闲聊/短消息跳过规划，节省 LLM 调用
-        _is_chat = self._is_casual_chat(user_message)
+        # 闲聊 / 一步命令跳过规划，节省 LLM 调用
+        _skip_plan = self._should_skip_planning(user_message)
         task_plan = None
-        if not _is_chat and self.planner and self.planner.planning_enabled:
+        if not _skip_plan and self.planner and self.planner.planning_enabled:
             try:
                 task_plan = await self.planner.plan(user_message)
                 if task_plan and task_plan.steps:
@@ -404,7 +422,7 @@ class AsyncBaseAgent:
             user_message + ("\n\n" + task_plan.to_text() if task_plan else "")
         )
 
-        # 注入世界知识 + 情绪状态到系统提示词
+        # 注入世界知识 + 情绪状态 (作为独立上下文消息, 保持 system 前缀稳定以命中缓存)
         extra_context = world_context
         if self.emotion_engine:
             emotion_fragment = self.emotion_engine.to_prompt_fragment()
@@ -417,11 +435,11 @@ class AsyncBaseAgent:
             extra_context += f"\n回复风格: {self.interaction.get_response_instruction(mode)}"
 
         if extra_context:
-            sys_msg = messages[0]
-            if isinstance(sys_msg, SystemMessage):
-                messages[0] = SystemMessage(
-                    content=sys_msg.content + "\n\n" + extra_context
-                )
+            # 插到当前用户消息之前 (历史之后), 不污染静态 system 前缀
+            messages.insert(
+                len(messages) - 1,
+                UserMessage(content=f"[上下文]\n{extra_context}"),
+            )
 
         self.stats.tasks_started += 1
         tool_steps = []
@@ -441,6 +459,7 @@ class AsyncBaseAgent:
                     messages=messages,
                     tools=self.tools.get_openai_tools(),
                     temperature=0.0,
+                    max_tokens=self.llm_max_tokens,
                 )
 
                 self.stats.llm_calls += 1
@@ -513,18 +532,17 @@ class AsyncBaseAgent:
                             direction="outgoing",
                         )
 
-                    # REFLECTING
+                    # Phase 5: 记录任务 (在回复之前)
+                    if self.interaction:
+                        self.interaction.record_task(user_message, True, len(tool_steps))
+
+                    # REFLECTING → 回复 (含 player 名字)
                     self.state = AgentState.REFLECTING
-                    await self._reflect_and_respond(event, reply, tool_steps)
+                    await self._reflect_and_respond(event, reply, tool_steps, player=player)
 
                     # Phase 5: 情绪触发
                     if self.emotion_engine:
                         self.emotion_engine.on_task_success(difficulty=len(tool_steps) / 10)
-
-                    # Phase 5: 交互格式化
-                    if self.interaction:
-                        self.interaction.record_task(user_message, True, len(tool_steps))
-                        reply = self.interaction.format_response(reply, recipient=player)
 
                     # Phase 4: 记录任务完成事件
                     if self.long_term_memory:
@@ -600,7 +618,7 @@ class AsyncBaseAgent:
                             messages.append(ToolMessage(
                                 tool_call_id=tc.id,
                                 name=tc.name,
-                                content=json.dumps(error_dict, ensure_ascii=False),
+                                content=ConversationMemory.truncate_tool_result(error_dict),
                             ))
                             self.memory.add_tool_result(tc.id, tc.name, error_dict)
                             continue
@@ -644,7 +662,7 @@ class AsyncBaseAgent:
                         messages.append(ToolMessage(
                             tool_call_id=tc.id,
                             name=tc.name,
-                            content=json.dumps(result_dict, ensure_ascii=False),
+                            content=ConversationMemory.truncate_tool_result(result_dict),
                         ))
                         self.memory.add_tool_result(tc.id, tc.name, result_dict)
 
@@ -667,7 +685,7 @@ class AsyncBaseAgent:
             # max_steps 耗尽
             timeout_msg = f"任务在 {self.max_tool_steps} 步内未完成。"
             logger.warning(f"[{self.name}] ⏰ 超时: {timeout_msg}")
-            await self._respond(event, timeout_msg, success=False)
+            await self._respond(event, timeout_msg, success=False, player=player)
             self.state = AgentState.IDLE
 
         except asyncio.CancelledError:
@@ -686,7 +704,7 @@ class AsyncBaseAgent:
                     error_msg=str(e),
                     step=step + 1,
                 )
-            await self._respond(event, f"处理出错: {e}", success=False)
+            await self._respond(event, f"处理出错: {e}", success=False, player=player)
             self.state = AgentState.IDLE
             self.stats.tasks_failed += 1
 
@@ -697,6 +715,7 @@ class AsyncBaseAgent:
         event: Event,
         reply: str,
         tool_steps: list[dict],
+        player: str = "",
     ):
         """任务完成后的反思评估"""
         # 简要反思: 任务是否真的完成？
@@ -707,13 +726,21 @@ class AsyncBaseAgent:
                 success = False
                 break
 
-        await self._respond(event, reply, success=success)
+        await self._respond(event, reply, success=success, player=player)
 
-    async def _respond(self, event: Event, message: str, success: bool = True):
+    async def _respond(self, event: Event, message: str, success: bool = True, player: str = ""):
         """回复用户"""
         # 发送到 Minecraft 聊天
-        prefix = "" if success else "❌ "
-        await self.bridge.send_chat(f"[{self.name}] {prefix}{message}")
+        if not success:
+            message = f"❌ {message}"
+
+        # 使用 InteractionManager 格式化 (含玩家名), 否则用简单格式
+        if self.interaction:
+            formatted = self.interaction.format_response(message, recipient=player)
+        else:
+            formatted = f"[{self.name}] {message}"
+
+        await self.bridge.send_chat(formatted)
 
         # 如果有 request id，响应回 EventBus
         if event.requires_response:
@@ -738,31 +765,54 @@ class AsyncBaseAgent:
         self._interrupt_flag.clear()
         self._log_state(f"已中断: {reason}")
 
-    # ── 对话检测 ────────────────────────────────────────────────────
+    # ── 跳过规划检测 ───────────────────────────────────────────────
 
-    def _is_casual_chat(self, message: str) -> bool:
-        """判断是否为闲聊（跳过规划 + 直接 finalAnswer）"""
+    def _should_skip_planning(self, message: str) -> bool:
+        """
+        判断是否可跳过预规划 LLM 调用
+
+        两种情况跳过:
+        1. 闲聊（打招呼、问感受、短消息无动作关键词）
+        2. 明显的一步命令（指令本身已暗示唯一的工具）
+        """
         msg = message.strip().lower()
-        # 长度 < 15 且不含动作关键词 → 闲聊
+
+        # 闲聊检测 (原 _is_casual_chat)
         action_keywords = [
             "挖", "砍", "去", "过来", "走", "找", "拿", "放", "做", "建",
             "收集", "攻击", "跑", "跳", "合成", "打开", "看", "给",
             "mine", "dig", "go", "come", "find", "craft", "place", "build",
             "attack", "get", "give", "move", "follow",
         ]
-        is_short = len(message.strip()) < 15
+        is_short = len(msg) < 15
         has_action = any(kw in msg for kw in action_keywords)
         is_question = "?" in msg or "？" in msg
-        return is_short and not has_action and not is_question
+        if is_short and not has_action and not is_question:
+            return True
+
+        # 一步命令：无需规划，直接执行即可
+        single_step_patterns = [
+            "过来", "停下", "站住", "跟紧我", "跟着我",
+            "打开箱子", "开箱", "看看周围", "看周围", "附近有什么",
+            "报时", "几点了", "什么时间",
+            "come", "come here", "follow me",
+            "stop", "wait", "look around",
+            "open chest",
+        ]
+        for p in single_step_patterns:
+            if p in msg:
+                return True
+
+        return False
 
     # ── 主动行为检测 ────────────────────────────────────────────────
 
-    def _detect_proactive_action(self) -> Optional[str]:
+    def _detect_proactive_action(self) -> Optional[tuple[str, str]]:
         """
         检测是否需要主动行为
 
         在 TIMER 事件中调用。基于世界状态判断是否需要主动帮助。
-        Phase 5 将扩展情绪/上下文感知。
+        返回 (冷却键, 模板消息) 或 None。默认走规则模板 (零 LLM 调用)。
         """
         ws = self.memory.world_state
         if ws is None:
@@ -770,15 +820,15 @@ class AsyncBaseAgent:
 
         # 低生命值 → 提醒
         if ws.health < 10:
-            return "玩家的生命值很低！检查是否有食物或药水可以提供，或者提醒玩家注意安全。"
+            return ("low_health", "⚠️ 你的生命值很低！快吃点东西或注意安全！")
 
         # 低饱食度 → 提供食物
         if ws.food < 6:
-            return "玩家的饱食度很低！询问玩家是否需要食物，或者主动寻找食物。"
+            return ("low_food", "🍗 你的饱食度很低了，需要我帮你找点食物吗？")
 
         # 夜间 → 提醒睡觉
         if ws.time_of_day in ("night", "midnight"):
-            return "现在是夜晚，怪物很多。询问玩家是否需要你守卫，或者提醒玩家睡觉。"
+            return ("night", "🌙 天黑了，怪物要出来了。需要我守卫，还是先睡觉？")
 
         return None
 

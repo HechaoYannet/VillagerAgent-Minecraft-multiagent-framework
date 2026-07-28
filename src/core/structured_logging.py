@@ -267,17 +267,18 @@ class StructuredLogger:
 
     async def _append_jsonl(self, path: str, entry: dict):
         """追加一行 JSON 到文件"""
-        if path.startswith("logs/"):
-            path = os.path.join(self.log_dir, "..", path) if ".." in path else path
-        full_path = os.path.join(self.log_dir, "..", path) if not path.startswith(self.log_dir) else path
-        # Normalize path
         if not os.path.isabs(path):
             path = os.path.join(os.getcwd(), path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         line = json.dumps(entry, ensure_ascii=False) + "\n"
+
+        def _write():
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line)
+
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: open(path, "a", encoding="utf-8").write(line))
+        await loop.run_in_executor(None, _write)
 
         # 检查文件大小, 必要时轮转
         await self._maybe_rotate(path)

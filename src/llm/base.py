@@ -8,7 +8,7 @@ LLM 抽象基类 — Phase 3 核心接口定义
 - Token 用量追踪
 
 用法：
-    from model.llm_base import ChatResult, ToolCall, TokenUsage, AsyncChatModel
+    from src.llm.base import ChatResult, ToolCall, TokenUsage, AsyncChatModel
 
 设计原则：
     - 协议无关：OpenAI / DeepSeek / Qwen / Gemini 均通过同一接口访问
@@ -241,7 +241,7 @@ class AsyncChatModel(ABC):
     子类可实现同步包装器（如果需要），但核心接口均为 async。
 
     用法:
-        model = OpenAICompatClient(api_key="...", base_url="...", model="deepseek-v4")
+        model = OpenAICompatClient(api_key="...", base_url="...", model="deepseek-chat")
         result = await model.chat([SystemMessage("你好")])
         print(result.content)
 
@@ -383,24 +383,7 @@ class ModelCapabilities:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 MODEL_CAPABILITIES_PRESETS: dict[str, ModelCapabilities] = {
-    # DeepSeek V4 (2026-04 发布，2026-07-24 起 chat/reasoner 弃用)
-    "deepseek-v4-flash": ModelCapabilities(
-        supports_tool_calling=True,
-        supports_reasoning=True,       # 支持 thinking 模式
-        supports_streaming=True,
-        max_context_tokens=1_000_000,  # 1M
-        max_output_tokens=384_000,
-        reasoning_in_stream_only=False,
-    ),
-    "deepseek-v4-pro": ModelCapabilities(
-        supports_tool_calling=True,
-        supports_reasoning=True,
-        supports_streaming=True,
-        max_context_tokens=1_000_000,
-        max_output_tokens=384_000,
-        reasoning_in_stream_only=False,
-    ),
-    # 旧版别名 (已弃用 2026-07-24，保留用于向后兼容)
+    # DeepSeek (真实型号: deepseek-chat = V3, deepseek-reasoner = R1)
     "deepseek-chat": ModelCapabilities(
         supports_tool_calling=True,
         supports_reasoning=False,
@@ -412,14 +395,6 @@ MODEL_CAPABILITIES_PRESETS: dict[str, ModelCapabilities] = {
         supports_reasoning=True,
         max_context_tokens=128_000,
         max_output_tokens=8_192,
-    ),
-    "deepseek-v4": ModelCapabilities(  # 泛用别名 → flash
-        supports_tool_calling=True,
-        supports_reasoning=True,
-        supports_streaming=True,
-        max_context_tokens=1_000_000,
-        max_output_tokens=384_000,
-        reasoning_in_stream_only=False,
     ),
     # OpenAI
     "gpt-4o": ModelCapabilities(
@@ -494,21 +469,9 @@ def detect_capabilities(model_name: str) -> ModelCapabilities:
 
     # 模糊匹配
     if "deepseek" in name_lower:
-        # V4 系列 (2026-04+)
-        if "v4" in name_lower:
-            if "pro" in name_lower:
-                return MODEL_CAPABILITIES_PRESETS["deepseek-v4-pro"]
-            return MODEL_CAPABILITIES_PRESETS["deepseek-v4-flash"]
-        # 旧版推理模型
         if "reasoner" in name_lower or "r1" in name_lower:
             return MODEL_CAPABILITIES_PRESETS["deepseek-reasoner"]
-        return ModelCapabilities(
-            supports_tool_calling=True,
-            supports_reasoning=False,
-            max_context_tokens=128_000,
-            max_output_tokens=32_000,
-            reasoning_in_stream_only=True,
-        )
+        return MODEL_CAPABILITIES_PRESETS["deepseek-chat"]
     if "gpt-4.1" in name_lower:
         return MODEL_CAPABILITIES_PRESETS["gpt-4.1"]
     if "gpt-4o" in name_lower:

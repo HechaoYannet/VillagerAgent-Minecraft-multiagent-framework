@@ -1,6 +1,8 @@
 import argparse
 import time
 import logging
+import os
+import yaml
 from math import floor
 import names
 from flask import Flask, request, jsonify
@@ -335,18 +337,15 @@ def dismantle():
 @app.route('/post_find', methods=['POST'])
 @log_activity(bot)
 def find():
-    """find name distance count: find tag in the distance, and count is the number of items you want to find."""
+    """find name count: 渐进搜索方块, 从小范围开始逐级扩大, 最远 1000 格."""
     data = request.get_json()
     name = data.get('name')
-    distance = data.get('distance', 16)
-    count = data.get('count', 3)
+    count = data.get('count', 5)
 
     if not name:
         name = ""
-    if not distance:
-        distance = 16
     if not count:
-        count = 3
+        count = 5
 
     if name == "carrot":
         name = "carrots"
@@ -355,15 +354,9 @@ def find():
 
     origin_name = name
     center_pos = bot.entity.position
-    # 随机移动一下 防止卡住
-    random_x = randint(-4, 4)
-    random_z = randint(-4, 4)
-    move_to(pathfinder, bot, Vec3, 3, Vec3(center_pos.x+random_x, center_pos.y, center_pos.z+random_z))
 
-    distance = min(32, max(16, distance)) # 限制在16-32之间
-    envs_info = get_envs_info(bot, distance)
     if name == "":
-        # bot.chat(f"can not find anything match '{data.get('name')}'")
+        # 空名称 → 返回环境摘要
         msg = get_envs_info2str(bot, RENDER_DISTANCE=16, same_entity_num=3)
         blocks = info_bot.get_blocks_nearby()
         hint, tag = readNearestSign(bot, Vec3, mcData, max_distance=16)
@@ -371,25 +364,62 @@ def find():
             msg += f"{block['name']} at {position_to_string(block['position'])}\n"
         if hint:
             msg += f"the sign nearby said: {hint}"
-        
+
         if os.path.exists(".cache/env.cache"):
             with open(".cache/env.cache", "r", encoding='utf-8') as f:
                 cache = json.load(f)
-            # 找到距离小于5的cache
             for c in cache:
                 pos = c["center"]
                 if (pos[0] - bot.entity.position.x) ** 2 + (pos[1] - bot.entity.position.y) ** 2 + (
                         pos[2] - bot.entity.position.z) ** 2 < 25:
                     msg += f"the env in the room: {c['state']}"
         events = info_bot.get_action_description_new()
-        return jsonify({'message': f"can not find anything match '{name}', environment: "+ msg, 'status': False, 'data':[], "new_events": events})
-    
-    observation = ""
-    # 耗时操作
-    name, pos_list_raw = find_everything_(bot, Vec3, envs_info, mcData, name, distance, count, visible_only=VISIBLE_ONLY)
-  
-    # remove duplicate
-    # bot.chat(f"pos_list_raw {pos_list_raw}")
+        return jsonify({'message': f"can not find anything match '{name}', environment: " + msg,
+                        'status': False, 'data': [], "new_events": events})
+
+    # ── 渐进搜索: 从小范围开始逐级扩大 ──
+    # 直接使用 bot.findBlocks() 搜索, 绕过 find_everything_ (其 is_entity_or_item
+    # 依赖 mcData.json, 但该文件只有 entities 没有 items/blocks, 会导致所有方块搜索失败)
+    SEARCH_STAGES = [16, 32, 64, 128, 256, 512, 1000]
+    pos_list_raw = []
+    used_distance = 16
+
+    # 先做名称模糊匹配
+    name_find, _tag = findSimilarName(name)
+
+    for stage_distance in SEARCH_STAGES:
+        used_distance = stage_distance
+        # 尝试直接搜索方块
+        try:
+            matching_id = findSomething(bot, mcData, name_find, 'block')[0]
+            if matching_id is not None:
+                found_positions = bot.findBlocks({
+                    "point": bot.entity.position,
+                    "matching": matching_id,
+                    "maxDistance": stage_distance,
+                    "count": count * 20,
+                })
+                if found_positions and len(found_positions) > 0:
+                    pos_list_raw = list(found_positions)
+                    name = name_find
+                    break
+        except Exception:
+            pass
+
+        # 方块搜索失败, 尝试 entity/item 搜索 (如 zombie, diamond 掉落物等)
+        try:
+            envs_info = get_envs_info(bot, stage_distance)
+            _matched_name, _raw_list = find_everything_(
+                bot, Vec3, envs_info, mcData, name, stage_distance, count, visible_only=VISIBLE_ONLY
+            )
+            if _raw_list:
+                name = _matched_name
+                pos_list_raw = _raw_list
+                break
+        except Exception:
+            pass
+
+    # ── 去重 ──
     pos_list = []
     for pos in pos_list_raw:
         for pos2 in pos_list:
@@ -399,29 +429,108 @@ def find():
         else:
             pos_list.append(pos)
 
-    pos_data = []
-
-    if len(pos_list) > 0:
-        str_pos_list = f'I found {name} '
-        # if pos_list is dict:
-        if type(pos_list) == dict:
-            for pos in pos_list:
-                str_pos_list += f'at {pos},'
-                pos_data.append({"x": floor(pos["x"] + .5), "y": floor(pos["y"] + .5), "z": floor(pos["z"] + .5)})
-        else:
-            for pos in pos_list:
-                str_pos_list += f'at {floor(pos.x + .5)} {floor(pos.y + .5)} {floor(pos.z + .5)},'
-                pos_data.append({"x": floor(pos.x + .5), "y": floor(pos.y + .5), "z": floor(pos.z + .5)})
-        observation += str_pos_list
-        done = True
-        events = info_bot.get_action_description_new()
-        return jsonify({'message': observation, 'status': done, 'data':pos_data, "new_events": events})
-    else:
-        observation += "I can't find anything named " + name
+    if len(pos_list) == 0:
+        observation = f"在 {used_distance} 格内找不到 {name}"
         if bot.heldItem and bot.heldItem.name == origin_name:
             observation += f" But I have {origin_name} in inventory."
         events = info_bot.get_action_description_new()
-        return jsonify({'message': observation, 'status': False, 'data':[], "new_events": events})
+        return jsonify({'message': observation, 'status': False, 'data': [], "new_events": events})
+
+    # ── 按距离排序 ──
+    bot_pos = bot.entity.position
+    pos_list.sort(key=lambda p: distanceTo(bot_pos, p))
+
+    # ── 记录起始位置 (检查完后尝试返回) ──
+    start_pos = Vec3(bot_pos.x, bot_pos.y, bot_pos.z)
+
+    # ── 可达性检查 (最多检查 5 个, 最近优先) ──
+    MAX_CHECK = min(count, 5)
+    blocks_data = []
+    total_found = len(pos_list)
+    checked_count = 0
+
+    for i, pos in enumerate(pos_list):
+        x = floor(pos.x + .5)
+        y = floor(pos.y + .5)
+        z = floor(pos.z + .5)
+        euclidean_dist = float(distanceTo(start_pos, Vec3(x, y, z)))
+
+        if i < MAX_CHECK:
+            checked_count += 1
+            if euclidean_dist <= 3.0:
+                # 已在范围内, 无需寻路
+                blocks_data.append({
+                    "x": x, "y": y, "z": z,
+                    "distance": euclidean_dist,
+                    "reachable": True,
+                    "pathfinding_msg": "Already nearby",
+                    "checked": True,
+                })
+            else:
+                # 增强寻路检查 (短超时)
+                check_steps = min(int(euclidean_dist) + 20, 50)
+                result = move_to_enhanced(
+                    pathfinder, bot, Vec3, 2,
+                    Vec3(x, y, z),
+                    canDig=True, allow1by1towers=True, canOpenDoors=True,
+                    max_steps=check_steps,
+                )
+                blocks_data.append({
+                    "x": x, "y": y, "z": z,
+                    "distance": euclidean_dist,
+                    "reachable": result["success"],
+                    "pathfinding_msg": result["message"],
+                    "checked": True,
+                })
+        else:
+            # 超出检查上限, 仅报告距离
+            blocks_data.append({
+                "x": x, "y": y, "z": z,
+                "distance": euclidean_dist,
+                "reachable": None,
+                "pathfinding_msg": "Not checked (too many results)",
+                "checked": False,
+            })
+
+    # ── 尝试回到起始位置 (最佳努力, 不阻塞) ──
+    current_dist = distanceTo(bot.entity.position, start_pos)
+    if current_dist > 5.0:
+        try:
+            move_to_enhanced(
+                pathfinder, bot, Vec3, 3, start_pos,
+                canDig=True, allow1by1towers=True, canOpenDoors=True,
+                max_steps=60,
+            )
+        except Exception:
+            pass  # 回不来就算了
+
+    # ── 库存检查 ──
+    inv = check_pathfinding_inventory(bot, target_block_name=origin_name)
+
+    # ── 构建消息 ──
+    reachable_count = sum(1 for b in blocks_data if b["reachable"] is True)
+    msg_parts = [f"找到 {total_found} 个 {name} (搜索范围: {used_distance} 格)"]
+    for b in blocks_data[:5]:
+        status = "✓可达" if b["reachable"] is True else ("✗不可达" if b["reachable"] is False else "?未检查")
+        msg_parts.append(f"({b['x']},{b['y']},{b['z']}) 距离{b['distance']:.0f}格 {status}")
+    if not inv["tool_status"]["has_required_tools"] and inv["tool_status"]["missing_tools"]:
+        msg_parts.append(f"⚠ 缺少工具: {', '.join(inv['tool_status']['missing_tools'])}")
+    if not inv["has_building_blocks"]:
+        msg_parts.append("⚠ 背包中没有建筑方块, 无法搭柱/铺路")
+
+    events = info_bot.get_action_description_new()
+    return jsonify({
+        'message': "; ".join(msg_parts),
+        'status': reachable_count > 0,
+        'data': {
+            "blocks": blocks_data,
+            "inventory": inv,
+            "search_distance": used_distance,
+            "total_found": total_found,
+            "blocks_checked": checked_count,
+        },
+        "new_events": events,
+    })
  
 @app.route('/post_hand', methods=['POST'])
 @log_activity(bot)
@@ -1433,8 +1542,28 @@ def position_to_string(position):
 # EasyAuth 自动登录 — 必须在模块级别注册 (spawn 之前就触发)
 # 因为 EasyAuth 在 spawn 前拦截，如果放在 spawn 里会形成死锁
 # ═══════════════════════════════════════════════════════════════════════════════
-_easyauth_password = os.environ.get("EASYAUTH_PASSWORD", "")
-_easyauth_force_login = os.environ.get("EASYAUTH_FORCE_LOGIN", "false").lower() == "true"
+# 读取顺序: 环境变量 → YAML(config/default.yaml + config/secrets.yaml)
+_easyauth_password = os.environ.get("EASYAUTH_PASSWORD")
+_easyauth_force_login_str = os.environ.get("EASYAUTH_FORCE_LOGIN")
+
+if not _easyauth_password:
+    try:
+        for cfg_path in ("config/default.yaml", "config/secrets.yaml"):
+            try:
+                with open(cfg_path, encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+                    ea = cfg.get("easyauth", {}) or {}
+                    if not _easyauth_password:
+                        _easyauth_password = ea.get("password", "")
+                    if not _easyauth_force_login_str:
+                        _easyauth_force_login_str = str(ea.get("force_login", "false"))
+            except (FileNotFoundError, PermissionError):
+                continue
+    except Exception:
+        _easyauth_password = _easyauth_password or ""
+
+_easyauth_password = _easyauth_password or ""
+_easyauth_force_login = (_easyauth_force_login_str or "false").lower() == "true"
 _easyauth_attempted = False
 
 if _easyauth_password:
@@ -1996,7 +2125,6 @@ def api_action():
         'getInventory': '/post_environment_dict',
         'getWorldInfo': '/post_world_info',
         'scanNearbyEntities': '/post_entity',
-        'scanNearbyBlocks': '/post_environment_dict',
         'findBlock': '/post_find',
         'equipItem': '/post_equip',
         'attackEntity': '/post_attack',
@@ -2030,8 +2158,7 @@ def api_action():
         'scanNearbyEntities': lambda a: {'name': a.get('entity_type', '')},
         'findBlock': lambda a: {
             'name': a.get('block_name', ''),
-            'distance': a.get('distance', 16),
-            'count': a.get('count', 3),
+            'count': a.get('count', 5),
         },
         'equipItem': lambda a: {
             'item_name': a.get('item_name', ''),
@@ -2046,7 +2173,6 @@ def api_action():
             'fuel_item_name': a.get('fuel_item', 'coal'),
         },
         'sendChat': lambda a: {'msg': a.get('message', '')},
-        'scanNearbyBlocks': lambda a: {'radius': a.get('radius', 16), 'block_name': a.get('block_name', '')},
         'finalAnswer': lambda a: {'feedback': a.get('summary', '任务完成')},
         'wait': lambda a: {
             'seconds': a.get('seconds', 5),

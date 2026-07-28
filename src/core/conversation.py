@@ -14,7 +14,7 @@
     memory = ConversationMemory(
         system_prompt=AGENT_SYSTEM_PROMPT,
         personality=personality_data,
-        max_history=100,
+        max_history=24,
     )
     messages = memory.build_messages(user_message="挖矿")
     # → [SystemMessage, ..., UserMessage]
@@ -80,15 +80,20 @@ class WorldStateSnapshot:
     @classmethod
     def from_bridge_data(cls, data: dict) -> "WorldStateSnapshot":
         """从 Minecraft Bridge 返回的数据构造"""
+        def _v(key: str, default):
+            """取 data[key], 若 key 不存在或值为 None 则返回 default"""
+            val = data.get(key)
+            return default if val is None else val
+
         return cls(
-            position=data.get("my_position"),
-            health=data.get("health", 20.0),
-            food=data.get("food", 20.0),
-            time_of_day=data.get("timeOfDay", "day"),
-            dimension=data.get("dimension", "overworld"),
-            nearby_entities=data.get("nearby_entities", []),
-            inventory_summary=data.get("inventory_summary", "库存为空"),
-            held_item=data.get("held_item", "空手"),
+            position=_v("my_position", None),
+            health=_v("health", 20.0),
+            food=_v("food", 20.0),
+            time_of_day=_v("timeOfDay", "day"),
+            dimension=_v("dimension", "overworld"),
+            nearby_entities=_v("nearby_entities", []),
+            inventory_summary=_v("inventory_summary", "库存为空"),
+            held_item=_v("held_item", "空手"),
         )
 
 
@@ -115,7 +120,7 @@ class ConversationMemory:
         self,
         system_prompt: str = AGENT_SYSTEM_PROMPT,
         personality: Optional[dict] = None,
-        max_history: int = 100,
+        max_history: int = 24,
         agent_name: str = "伙伴",
     ):
         self._system_prompt = system_prompt
@@ -148,21 +153,7 @@ class ConversationMemory:
         ).replace(
             "{{personality}}", personality_text
         ).replace(
-            "{{traits}}", self._personality.get("特征", self._personality.get("traits", "友好、乐于助人"))
-        ).replace(
             "{{minecraft_knowledge}}", MINECRAFT_KNOWLEDGE_CARD_ZH
-        ).replace(
-            "{{tool_descriptions}}", self._tool_descriptions
-        ).replace(
-            "{{relevant_data}}", ""
-        ).replace(
-            "{{env}}", ""
-        ).replace(
-            "{{agent_state}}", ""
-        ).replace(
-            "{{other_agents}}", ""
-        ).replace(
-            "{{agent_action_list}}", "暂无操作记录"
         ).replace(
             "{{response_style}}", "友好、自然、像朋友聊天，不啰嗦，不刻意展现 AI 特征"
         )
@@ -220,9 +211,21 @@ class ConversationMemory:
         if reasoning:
             self._last_reasoning = reasoning
 
+    # 工具结果 content 超过该字符数时截断 (节省 token)
+    TOOL_RESULT_MAX_CHARS: int = 800
+
+    @staticmethod
+    def truncate_tool_result(result: dict) -> str:
+        """序列化工具结果并按长度截断 (保留头部, 节省 token)"""
+        result_str = json.dumps(result, ensure_ascii=False)
+        limit = ConversationMemory.TOOL_RESULT_MAX_CHARS
+        if len(result_str) > limit:
+            result_str = result_str[:limit] + f"...[已截断 len={len(result_str)}]"
+        return result_str
+
     def add_tool_result(self, tool_call_id: str, tool_name: str, result: dict):
         """添加工具执行结果"""
-        result_str = json.dumps(result, ensure_ascii=False)
+        result_str = self.truncate_tool_result(result)
         self._messages.append(ToolMessage(
             tool_call_id=tool_call_id,
             name=tool_name,

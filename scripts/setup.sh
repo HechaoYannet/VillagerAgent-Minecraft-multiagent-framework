@@ -5,8 +5,7 @@
 # 用法:
 #   chmod +x scripts/setup.sh
 #   ./scripts/setup.sh              # 基础安装
-#   ./scripts/setup.sh --full       # 含 Gemini + ChromaDB + 开发工具
-#   ./scripts/setup.sh --dev        # 含开发工具
+#   ./scripts/setup.sh --dev        # 含开发工具 (pytest/black/ruff/mypy)
 # =============================================
 set -e
 
@@ -112,17 +111,9 @@ INSTALL_MODE="${1:-base}"
 info "安装 Python 依赖 (模式: $INSTALL_MODE)..."
 
 case "$INSTALL_MODE" in
-    --full|-f)
-        pip install -e ".[full]" --quiet
-        ok "已安装: 核心 + Gemini + ChromaDB + 开发工具"
-        ;;
     --dev|-d)
-        pip install -e ".[dev,memory]" --quiet
-        ok "已安装: 核心 + ChromaDB + 开发工具"
-        ;;
-    --gemini|-g)
-        pip install -e ".[gemini]" --quiet
-        ok "已安装: 核心 + Google Gemini"
+        pip install -e ".[dev]" --quiet
+        ok "已安装: 核心 + 开发工具"
         ;;
     *)
         pip install -e "." --quiet

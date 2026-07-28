@@ -129,4 +129,5 @@ fi
 info "[3/3] 启动 VillagerAgent 主系统..."
 echo ""
 
+export BRIDGE_MODE
 exec python main.py "${MAIN_ARGS[@]}"

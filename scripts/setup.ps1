@@ -3,17 +3,14 @@
 # =============================================
 # 用法:
 #   .\scripts\setup.ps1              # 基础安装
-#   .\scripts\setup.ps1 -Full        # 含 Gemini + ChromaDB + 开发工具
-#   .\scripts\setup.ps1 -Dev         # 含开发工具
+#   .\scripts\setup.ps1 -Dev         # 含开发工具 (pytest/black/ruff/mypy)
 #
 # 注意: 首次运行可能需要:
 #   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 # =============================================
 
 param(
-    [switch]$Full,
-    [switch]$Dev,
-    [switch]$Gemini
+    [switch]$Dev
 )
 
 $ErrorActionPreference = "Stop"
@@ -114,15 +111,9 @@ pip install --upgrade pip --quiet
 # ═══════════════════════════════════════════════════════════════════
 Write-Host "[INFO] 安装 Python 依赖..." -ForegroundColor Cyan
 
-if ($Full) {
-    pip install -e ".[full]" --quiet
-    Write-Host "[OK]   已安装: 核心 + Gemini + ChromaDB + 开发工具" -ForegroundColor Green
-} elseif ($Dev) {
-    pip install -e ".[dev,memory]" --quiet
-    Write-Host "[OK]   已安装: 核心 + ChromaDB + 开发工具" -ForegroundColor Green
-} elseif ($Gemini) {
-    pip install -e ".[gemini]" --quiet
-    Write-Host "[OK]   已安装: 核心 + Google Gemini" -ForegroundColor Green
+if ($Dev) {
+    pip install -e ".[dev]" --quiet
+    Write-Host "[OK]   已安装: 核心 + 开发工具" -ForegroundColor Green
 } else {
     pip install -e "." --quiet
     Write-Host "[OK]   已安装: 核心依赖" -ForegroundColor Green

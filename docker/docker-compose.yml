@@ -7,9 +7,6 @@
 #        MINECRAFT_HOST=你的MC服务器IP
 #        LLM_API_KEY=sk-your-api-key
 #   3. docker compose -f docker/docker-compose.yml up
-#
-# 仅运行 Agent (无 ChromaDB):
-#   docker compose -f docker/docker-compose.yml up villager-core
 # =============================================
 
 version: '3.8'
@@ -40,52 +37,18 @@ services:
       - WEB_PORT=${WEB_PORT:-8080}
       # LLM API (推荐通过环境变量传入, 避免写死在 secrets.yaml)
       - LLM_API_KEY=${LLM_API_KEY:-}
-      # 运行时模式
-      - VILLAGER_ENV=${VILLAGER_ENV:-production}
     ports:
       - "${WEB_PORT:-8080}:8080"
       # Bridge 端口仅内部使用, 如需外部访问请取消注释:
       # - "${BRIDGE_PORT:-5000}:5000"
     networks:
       - villager-net
-    # ChromaDB 是可选的 (用于长期记忆), 如不需要可删除 depends_on
-    # depends_on:
-    #   chromadb:
-    #     condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 90s
-
-  # ── 向量数据库: ChromaDB (可选, 长期记忆) ──
-  # 如不需要, 注释掉此服务并在 config/default.yaml 设置 memory.long_term_enabled: false
-  chromadb:
-    image: chromadb/chroma:latest
-    container_name: villager-chromadb
-    restart: unless-stopped
-    profiles:
-      - full
-    volumes:
-      - chroma_data:/chroma/chroma
-    environment:
-      - IS_PERSISTENT=TRUE
-      - PERSIST_DIRECTORY=/chroma/chroma
-      - ANONYMIZED_TELEMETRY=FALSE
-    ports:
-      - "8001:8000"
-    networks:
-      - villager-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-volumes:
-  chroma_data:
-    driver: local
 
 networks:
   villager-net:

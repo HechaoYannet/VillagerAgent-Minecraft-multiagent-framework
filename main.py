@@ -40,6 +40,10 @@ def load_config(config_path: str = "config/default.yaml") -> dict:
         if "llm" not in config:
             config["llm"] = {}
         config["llm"]["api_key"] = os.environ["LLM_API_KEY"]
+    if os.environ.get("BRIDGE_MODE"):
+        if "bridge" not in config:
+            config["bridge"] = {}
+        config["bridge"]["mode"] = os.environ["BRIDGE_MODE"]
 
     return config
 

@@ -10,7 +10,7 @@ LLM 重试工具 — 指数退避 + 断路器模式
 - Token 用量计入重试预算
 
 用法：
-    from model.retry_utils import RetryConfig, async_retry, CircuitBreaker
+    from src.llm.retry import RetryConfig, async_retry, CircuitBreaker
 
     retry = RetryConfig(max_retries=5, base_delay=1.0, max_delay=60.0)
     result = await async_retry(lambda: client.chat(...), config=retry)

@@ -317,7 +317,7 @@ class ToolEntry:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Minecraft 工具预定义 — 基础集合
+# Minecraft 工具预定义 — 18 个, 与 env/minecraft_server.py /api/action 路由一一对应
 # ═══════════════════════════════════════════════════════════════════════════════
 
 MINECRAFT_TOOL_DEFINITIONS: list[ToolDefinition] = [
@@ -405,24 +405,16 @@ MINECRAFT_TOOL_DEFINITIONS: list[ToolDefinition] = [
 
     # ── 世界信息类 ──
     ToolDefinition(
-        name="scanNearbyBlocks",
-        description="扫描附近的方块",
-        parameters=[
-            ToolParameter("radius", "integer", "扫描半径 (格)", required=False),
-            ToolParameter("block_name", "string", "要查找的方块名称 (如 chest, crafting_table, furnace)", required=False),
-        ],
-    ),
-    ToolDefinition(
         name="getWorldInfo",
-        description="获取当前世界信息: 时间、天气、位置、生命值、食物值等",
+        description="获取当前世界信息: 时间、天气、位置、生命值、食物值、附近方块列表等",
         parameters=[],
     ),
     ToolDefinition(
         name="findBlock",
-        description="搜索指定方块在周围的位置",
+        description="搜索指定方块在周围的位置，返回每个方块的距离和是否可到达。自动从小范围开始渐进搜索，最远1000格。",
         parameters=[
             ToolParameter("block_name", "string", "方块名称"),
-            ToolParameter("max_distance", "integer", "最大搜索距离 (格)", required=False),
+            ToolParameter("count", "integer", "最多返回数量 (默认 5)", required=False),
         ],
     ),
 
@@ -472,7 +464,7 @@ MINECRAFT_TOOL_DEFINITIONS: list[ToolDefinition] = [
         ],
     ),
 
-    # ── Phase 6: 扩展工具 (12 个) ──
+    # ── 扩展工具 (有 Flask 桥接实现) ──
 
     ToolDefinition(
         name="followPlayer",
@@ -480,115 +472,6 @@ MINECRAFT_TOOL_DEFINITIONS: list[ToolDefinition] = [
         parameters=[
             ToolParameter("player_name", "string", "要跟随的玩家名称"),
             ToolParameter("distance", "integer", "保持的距离 (格，默认 3)", required=False),
-        ],
-    ),
-    ToolDefinition(
-        name="guardArea",
-        description="在指定区域内巡逻并自动攻击敌对生物。Agent 会在区域内来回移动，发现怪物时主动攻击。",
-        parameters=[
-            ToolParameter("center_x", "integer", "区域中心 X 坐标"),
-            ToolParameter("center_z", "integer", "区域中心 Z 坐标"),
-            ToolParameter("radius", "integer", "巡逻半径 (格)"),
-            ToolParameter("duration", "integer", "巡逻时长 (秒，默认 60)", required=False),
-        ],
-    ),
-    ToolDefinition(
-        name="sortInventory",
-        description="按指定方式整理库存。可以按物品名称、类型或数量排序。",
-        parameters=[
-            ToolParameter("sort_by", "string", "排序方式: name/type/count", enum=["name", "type", "count"]),
-        ],
-    ),
-    ToolDefinition(
-        name="autoFish",
-        description="自动钓鱼。持续钓鱼直到库存满、指定时间到或收到停止指令。",
-        parameters=[
-            ToolParameter("max_duration", "integer", "最大钓鱼时长 (秒, 默认 120)", required=False),
-        ],
-    ),
-    ToolDefinition(
-        name="buildShape",
-        description="构建几何形状 (圆形、正方形、直线、平台)。按指定材料和尺寸建造。",
-        parameters=[
-            ToolParameter("shape", "string", "形状类型: circle/square/line/platform", enum=["circle", "square", "line", "platform"]),
-            ToolParameter("material", "string", "建材名称 (如 stone, oak_planks)"),
-            ToolParameter("size", "integer", "尺寸 (圆的半径/正方形边长/线长度/平台边长)"),
-            ToolParameter("center_x", "integer", "中心/起点 X 坐标"),
-            ToolParameter("center_y", "integer", "中心/起点 Y 坐标"),
-            ToolParameter("center_z", "integer", "中心/起点 Z 坐标"),
-            ToolParameter("hollow", "boolean", "是否中空 (仅 platform/square 支持, 默认 false)", required=False),
-        ],
-    ),
-    ToolDefinition(
-        name="copyBuild",
-        description="复制现有建筑结构到新位置。先扫描源区域，再在目标位置重建。",
-        parameters=[
-            ToolParameter("from_x1", "integer", "源区域起点 X"),
-            ToolParameter("from_y1", "integer", "源区域起点 Y"),
-            ToolParameter("from_z1", "integer", "源区域起点 Z"),
-            ToolParameter("from_x2", "integer", "源区域终点 X"),
-            ToolParameter("from_y2", "integer", "源区域终点 Y"),
-            ToolParameter("from_z2", "integer", "源区域终点 Z"),
-            ToolParameter("to_x", "integer", "目标起点 X"),
-            ToolParameter("to_y", "integer", "目标起点 Y"),
-            ToolParameter("to_z", "integer", "目标起点 Z"),
-        ],
-    ),
-    ToolDefinition(
-        name="landscaping",
-        description="地形改造: 平整/挖掘/填充指定区域。用于大范围地形操作。",
-        parameters=[
-            ToolParameter("operation", "string", "操作类型: flatten/dig/fill", enum=["flatten", "dig", "fill"]),
-            ToolParameter("x1", "integer", "区域起点 X"),
-            ToolParameter("z1", "integer", "区域起点 Z"),
-            ToolParameter("x2", "integer", "区域终点 X"),
-            ToolParameter("z2", "integer", "区域终点 Z"),
-            ToolParameter("material", "string", "填充材料 (仅 fill 操作需要)", required=False),
-            ToolParameter("target_y", "integer", "目标高度 (flatten 操作需要)", required=False),
-        ],
-    ),
-    ToolDefinition(
-        name="pathBuild",
-        description="在两点之间建造路径。自动生成直线或 L 形路径。",
-        parameters=[
-            ToolParameter("from_x", "integer", "起点 X"),
-            ToolParameter("from_y", "integer", "起点 Y"),
-            ToolParameter("from_z", "integer", "起点 Z"),
-            ToolParameter("to_x", "integer", "终点 X"),
-            ToolParameter("to_y", "integer", "终点 Y"),
-            ToolParameter("to_z", "integer", "终点 Z"),
-            ToolParameter("material", "string", "路面材料 (如 cobblestone, stone_bricks)"),
-            ToolParameter("width", "integer", "路面宽度 (默认 1)", required=False),
-        ],
-    ),
-    ToolDefinition(
-        name="takeScreenshot",
-        description="从 Agent 视角截图。保存当前视角的画面。",
-        parameters=[],
-    ),
-    ToolDefinition(
-        name="checkWeather",
-        description="检查当前天气和时间。返回是否下雨/雷暴/晴天及游戏时间。",
-        parameters=[],
-    ),
-    ToolDefinition(
-        name="countNearby",
-        description="统计附近指定类型的实体或方块数量。用于快速了解周围环境。",
-        parameters=[
-            ToolParameter("target_type", "string", "统计目标类型: entity/block"),
-            ToolParameter("target_name", "string", "目标名称 (如 zombie, chest, coal_ore, 留空统计全部)", required=False),
-            ToolParameter("radius", "integer", "统计半径 (格, 默认 32)", required=False),
-        ],
-    ),
-    ToolDefinition(
-        name="escort",
-        description="护送玩家安全到达指定位置。沿途保护玩家免受怪物攻击。",
-        parameters=[
-            ToolParameter("player_name", "string", "要护送的玩家名称"),
-            ToolParameter("dest_x", "integer", "目的地 X"),
-            ToolParameter("dest_y", "integer", "目的地 Y"),
-            ToolParameter("dest_z", "integer", "目的地 Z"),
-            ToolParameter("combat_mode", "boolean", "是否主动攻击沿途怪物 (默认 true)", required=False),
         ],
     ),
 ]

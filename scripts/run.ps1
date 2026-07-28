@@ -163,6 +163,7 @@ function Stop-BridgeProcess {
 
 # 使用 try/finally 确保 Ctrl+C 和正常退出都能清理
 try {
+    $env:BRIDGE_MODE = $BridgeMode
     & python main.py $MainArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[WARN] main.py 退出码: $LASTEXITCODE" -ForegroundColor Yellow

@@ -781,6 +781,259 @@ def move_to(pathfinder, bot, Vec3, RANGE_GOAL, pos):  # √
     return True, f" move to {pos.x} {pos.y} {pos.z}"
 
 
+def move_to_enhanced(pathfinder, bot, Vec3, RANGE_GOAL, pos,
+                     canDig=True, allow1by1towers=True, canOpenDoors=True,
+                     max_steps=None):
+    """
+    增强寻路 — 支持挖掘/放置方块，返回结构化字典。
+
+    与 move_to() 的区别:
+    - canDig=True: 允许寻路时破坏阻挡方块
+    - allow1by1towers=True: 允许搭方块柱子攀爬
+    - 返回结构化 dict 而非 tuple，包含 start_distance / pathfound 等字段
+    - 可通过 max_steps 限制寻路步数 (用于快速可达性检查)
+
+    Returns:
+        {
+            "success": bool,
+            "message": str,
+            "pathfound": bool,        # 寻路器是否找到路径 (vs. 超时)
+            "distance": float,        # 最终到目标的距离
+            "start_distance": float,  # 寻路前的起始距离
+        }
+    """
+    import math
+    if pos is None:
+        return {
+            "success": False,
+            "message": "move failed, no target position",
+            "pathfound": False,
+            "distance": -1,
+            "start_distance": -1,
+        }
+
+    start_distance = float(distanceTo(bot.entity.position, Vec3(pos.x, pos.y, pos.z)))
+
+    mv_ = pathfinder.Movements(bot)
+    mv_.allow1by1towers = allow1by1towers
+    mv_.canDig = canDig
+    mv_.canOpenDoors = canOpenDoors
+
+    try_num = 3
+    while try_num > 0:
+        try:
+            bot.pathfinder.setMovements(mv_)
+            bot.pathfinder.setGoal(pathfinder.goals.GoalNear(pos.x, pos.y, pos.z, RANGE_GOAL))
+            break
+        except Exception:
+            try_num -= 1
+            time.sleep(1)
+
+    # 50 格硬上限 (与 move_to 一致)
+    if start_distance >= 50:
+        return {
+            "success": False,
+            "message": f"move failed, position {pos.x} {pos.y} {pos.z} is too far away ({start_distance:.1f} blocks)",
+            "pathfound": False,
+            "distance": start_distance,
+            "start_distance": start_distance,
+        }
+
+    if max_steps is None:
+        max_steps = int(start_distance) + 30
+
+    ori_x, ori_y, ori_z = bot.entity.position.x, bot.entity.position.y, bot.entity.position.z
+    tiks = 0
+    block_name = bot.blockAt(pos)['name']
+    block_name_below = bot.blockAt(pos.offset(0, -1, 0))['name']
+    range_to_block = 0
+    if "pressure_plate" in block_name or "pressure_plate" in block_name_below:
+        range_to_block = 1.4
+
+    while (distanceTo(bot.entity.position, Vec3(pos.x, pos.y, pos.z)) >= RANGE_GOAL
+           and max_steps > 0
+           and distanceTo(bot.entity.position, Vec3(pos.x, pos.y, pos.z)) > 1):
+        try_num = 3
+        while try_num > 0:
+            try:
+                bot.pathfinder.setGoal(pathfinder.goals.GoalNear(pos.x, pos.y, pos.z, range_to_block))
+                x, y, z = bot.entity.position.x, bot.entity.position.y, bot.entity.position.z
+                tiks += 1
+                abs_dis = max(abs(ori_x - x), abs(ori_y - y), abs(ori_z - z))
+                mean_v = abs_dis / max(tiks, 1)
+                break
+            except Exception:
+                try_num -= 1
+                time.sleep(1)
+                x, y, z = bot.entity.position.x, bot.entity.position.y, bot.entity.position.z
+                tiks += 1
+                abs_dis = max(abs(ori_x - x), abs(ori_y - y), abs(ori_z - z))
+                mean_v = abs_dis / max(tiks, 1)
+
+        if mean_v < 0.2:
+            max_steps -= 1
+        if mean_v < 0.05 and last_jump_time < time.time() - 10:
+            x, y, z = bot.entity.position.x, bot.entity.position.y, bot.entity.position.z
+            if bot.blockAt(Vec3(x, y + 1.2, z))['name'] == 'air':
+                last_jump_time = time.time()
+
+    final_distance = float(distanceTo(bot.entity.position, Vec3(pos.x, pos.y, pos.z)))
+
+    if max_steps <= 0 and final_distance >= RANGE_GOAL + 1.5:
+        pathfound = False
+        if start_distance - final_distance > 5:
+            # 虽然没到但前进了一段距离
+            reason = f"partially blocked, reached within {final_distance:.1f} blocks"
+        elif bot.blockAt(pos)['name'] == 'air':
+            reason = f"need to jump or place dirt blocks (distance={final_distance:.1f})"
+        else:
+            reason = f"position is blocked, check environment (distance={final_distance:.1f})"
+        return {
+            "success": False,
+            "message": reason,
+            "pathfound": pathfound,
+            "distance": final_distance,
+            "start_distance": start_distance,
+        }
+
+    return {
+        "success": True,
+        "message": f"reached target within {final_distance:.1f} blocks",
+        "pathfound": True,
+        "distance": final_distance,
+        "start_distance": start_distance,
+    }
+
+
+# ── 库存检查: 寻路所需工具和建筑方块 ──
+
+# 可用作搭柱/铺路的固体方块
+BUILDING_BLOCKS = [
+    "dirt", "grass_block", "cobblestone", "stone", "andesite", "diorite", "granite",
+    "oak_planks", "spruce_planks", "birch_planks", "jungle_planks",
+    "acacia_planks", "dark_oak_planks", "mangrove_planks", "cherry_planks",
+    "bamboo_planks", "crimson_planks", "warped_planks",
+    "sandstone", "red_sandstone", "netherrack", "end_stone",
+    "deepslate", "cobbled_deepslate", "tuff", "gravel",
+]
+
+# 工具类型后缀 → 中文名
+TOOL_SUFFIXES = {
+    "pickaxe": "镐",
+    "_axe": "斧",
+    "shovel": "锹",
+    "_hoe": "锄",
+}
+
+
+def check_pathfinding_inventory(bot, target_block_name=None):
+    """
+    检查机器人背包中是否有寻路所需的工具和建筑方块。
+
+    Args:
+        bot: Mineflayer bot 实例
+        target_block_name: 目标方块名 (用于工具需求检查, 可选)
+
+    Returns:
+        dict: {
+            "tool_status": {
+                "has_required_tools": bool,
+                "required_tools": [str],
+                "held_item": str | None,
+                "missing_tools": [str],
+            },
+            "building_blocks": {block_name: count, ...},
+            "has_building_blocks": bool,
+            "inventory_summary": str,
+            "can_dig_target": bool,
+        }
+    """
+    items = bot.inventory.items()
+    held_name = None
+    if bot.heldItem and hasattr(bot.heldItem, 'name') and bot.heldItem.name:
+        held_name = bot.heldItem.name
+
+    # ── 1. 工具检查 ──
+    required_tools = []
+    missing_tools = []
+    can_dig = True
+
+    if target_block_name:
+        # 查 dig_data 确认目标是否需要工具
+        for entry in dig_data:
+            if target_block_name == entry.get("name", ""):
+                if not entry.get("diggable", True):
+                    can_dig = False
+                if "tools" in entry and entry["tools"]:
+                    required_tools = entry["tools"]
+                    # 检查背包是否有任一所需工具
+                    has_tool = False
+                    if held_name and held_name in required_tools:
+                        has_tool = True
+                    else:
+                        for item in items:
+                            if item.get("name", "") in required_tools:
+                                has_tool = True
+                                break
+                    if not has_tool:
+                        can_dig = False
+                        missing_tools = required_tools
+                break
+
+    tool_status = {
+        "has_required_tools": len(missing_tools) == 0,
+        "required_tools": required_tools,
+        "held_item": held_name,
+        "missing_tools": missing_tools,
+    }
+
+    # ── 2. 建筑方块检查 (精确名称匹配, 避免子串误报) ──
+    building_blocks = {}
+    for item in items:
+        item_name = item.get("name", "")
+        if item_name in BUILDING_BLOCKS:
+            building_blocks[item_name] = building_blocks.get(item_name, 0) + item.get("count", 0)
+
+    # 手持物也可能是建筑方块
+    if held_name and held_name in BUILDING_BLOCKS:
+        building_blocks[held_name] = building_blocks.get(held_name, 0) + 1
+
+    total_building = sum(building_blocks.values())
+
+    # ── 3. 库存摘要 ──
+    summary_parts = []
+    if held_name:
+        summary_parts.append(f"手持: {held_name}")
+    if building_blocks:
+        top_blocks = sorted(building_blocks.items(), key=lambda kv: -kv[1])[:3]
+        summary_parts.append("建筑方块: " + ", ".join(f"{k}×{v}" for k, v in top_blocks))
+
+    # 工具摘要
+    tools_found = []
+    for item in items:
+        item_name = item.get("name", "")
+        for suffix, cn_name in TOOL_SUFFIXES.items():
+            if item_name.endswith(suffix):
+                tools_found.append(item_name)
+                break
+    if held_name:
+        for suffix in TOOL_SUFFIXES:
+            if held_name.endswith(suffix):
+                if held_name not in tools_found:
+                    tools_found.append(held_name)
+                break
+    if tools_found:
+        summary_parts.append("工具: " + ", ".join(tools_found[:5]))
+
+    return {
+        "tool_status": tool_status,
+        "building_blocks": building_blocks,
+        "has_building_blocks": total_building > 0,
+        "inventory_summary": "; ".join(summary_parts) if summary_parts else "库存为空",
+        "can_dig_target": can_dig,
+    }
+
+
 def find_nearest_(bot, Vec3, envs_info, mcData, name):  # X
     name, pos_list = find_everything_(bot, Vec3, envs_info, mcData, name, distance=128, count=10)
     # sort by distance
@@ -850,6 +1103,22 @@ def find_everything_(bot, Vec3, envs_info, mcData, name="", distance=32, count=1
         entities_pos.append(pos)
         return name, entities_pos
     if type_ == "error":
+        # 名称不在 mcData.json 的 entities/items 中 (如 oak_log 是 block)
+        # 尝试直接当作 block 搜索, 不要直接放弃
+        try:
+            matching = findSomething(bot, mcData, name_find, 'block')
+            if matching[0] is not None:
+                blocks = bot.findBlocks({
+                    "point": bot.entity.position,
+                    "matching": matching[0],
+                    "maxDistance": distance,
+                    "count": count * 10,
+                })
+                block_list = [b for b in blocks]
+                if block_list:
+                    return name_find, block_list[:count]
+        except Exception:
+            pass
         return "Cannot find anything named " + name, []
 
     if type_ == "entity":
